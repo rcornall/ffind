@@ -80,10 +80,12 @@ int main(int argc, char *argv[]) {
 	refresh();
 
 	char line[256];
+	char results[1000][256];
 	int total_lines = 0;
 	while (fgets(line, sizeof(line), fp) && total_lines < MAX_LINES) {
 		//printf("%s\n", line);
 		mvwprintw(pad, total_lines, 0, "%s", line);
+		strncpy(results[total_lines], line, sizeof(line));
 		total_lines++;
 	}
 	fclose(fp);
@@ -94,7 +96,9 @@ int main(int argc, char *argv[]) {
 	int curr_line=0;
 	int sel_line=0;
 	int ch;
-	while ((ch = getch()) != 'q') {
+	char *file;
+	int found =0;
+	while ((ch = getch()) != 'q' && (found == 0)) {
 		switch (ch) {
 		// let user scroll lines and select one:
 			case 'j':
@@ -105,7 +109,16 @@ int main(int argc, char *argv[]) {
 				break;
 			case '\r':
 			case '\n':
-				printf("ENTER\n");
+				refresh();
+				prefresh(pad, 0, 0, 2, 2, LINES-3, COLS-3);
+				// printf("ENTER: %d, %s\n", sel_line, results[sel_line]);
+
+				// find the file and open it:
+				char *tmp = strchr(results[sel_line], ':');
+				results[sel_line][tmp-results[sel_line]] = '\0';
+				// printf("%d: %s\n", tmp-results[sel_line], results[sel_line]);
+				found=1;
+				file = results[sel_line];
 				break;
 
 		// let user enter fuzzy filter om lines
@@ -116,7 +129,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// 2. Load file into the Pad
-	fp = fopen("test.txt", "r");
+	fp = fopen(file, "r");
 	total_lines = 0;
 	if (fp) {
 		while (fgets(line, sizeof(line), fp) && total_lines < MAX_LINES) {
