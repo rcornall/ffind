@@ -3,6 +3,7 @@
  */
 
 #include <tui.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 struct local_env {
@@ -42,6 +43,7 @@ struct tui_window* tui_init(bool autosize, int cols, int rows,
 	t->curr_col = 0;
 	t->x1 = 2;
 	t->y1 = 2;
+	/* todo reversed */
 	t->x2 = LINES-3;
 	t->y2 = COLS-3;
 
@@ -81,8 +83,27 @@ void tui_write_lines(struct tui_window *t, char *lines, int line_width, size_t n
 	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
 }
 
+int tui_write_file(struct tui_window *t, FILE* fp)
+{
+	char line[256];
+	int total_lines = 0;
+	if (fp) {
+		while (fgets(line, sizeof(line), fp) && total_lines < t->x2) {
+			mvwprintw(t->w, total_lines, 0, "%s", line);
+			total_lines++;
+		}
+		fclose(fp);
+	} else {
+		wprintw(t->w, "File not found.");
+		return 0;
+	}
+
+	return total_lines;
+}
+
 void tui_scroll_up(struct tui_window *t, int count)
 {
+	// tui_write_line(t, results[sel_line], sel_line, -1, true);
 }
 
 void tui_scroll_down(struct tui_window *t, int count)

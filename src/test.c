@@ -6,7 +6,7 @@
 #include <tui.h>
 
 #define PREVIEW_HEIGHT 10
-#define PREVIEW_WIDTH 70
+#define PREVIEW_WIDTH 90
 #define MAX_LINES 1000  // Maximum lines the pad can hold
 //#define PREVIEW_WIDTH 30
 //
@@ -120,38 +120,30 @@ int main(int argc, char *argv[]) {
 	char *file;
 	int found =0;
 
-	while ((ch = getch()) != 'q') {
-		tui_write_line(t1, "test", 2, -1, false);
-	}
-#if 0
 	while ((ch = getch()) != 'q' && (found == 0)) {
 		switch (ch) {
 		// let user scroll lines and select one:
 			case 'j':
 				// clear previous line color first.
-				mvwprintw(pad, sel_line, 0, "TSET %s", results[sel_line]);
+				tui_write_line(t1, results[sel_line], sel_line, -1, false);
 				sel_line++;
-				wattron(pad, COLOR_PAIR(1));
-				mvwprintw(pad, sel_line, 0, "TSET %s", results[sel_line]);
-				wattroff(pad, COLOR_PAIR(1));
-				prefresh(pad, 0, 0, 2, 2, LINES-3, COLS-3);
+				tui_write_line(t1, results[sel_line], sel_line, -1, true);
+				// tui_scroll_down(t1, 1);
 				break;
 			case 'k':
+				tui_write_line(t1, results[sel_line], sel_line, -1, false);
 				sel_line--;
+				tui_write_line(t1, results[sel_line], sel_line, -1, true);
 				break;
 			case '\r':
-			case '\n':
-				refresh();
-				prefresh(pad, 0, 0, 2, 2, LINES-3, COLS-3);
-				// printf("ENTER: %d, %s\n", sel_line, results[sel_line]);
-
+			case '\n': {
 				// find the file and open it:
 				char *tmp = strchr(results[sel_line], ':');
 				results[sel_line][tmp-results[sel_line]] = '\0';
 				// printf("%d: %s\n", tmp-results[sel_line], results[sel_line]);
 				found=1;
 				file = results[sel_line];
-				break;
+			} break;
 
 		// let user enter fuzzy filter om lines
 		// let user enter to takes current filtered results as the new search list. so to make further searches on this list.
@@ -160,24 +152,15 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+
 	// 2. Load file into the Pad
 	fp = fopen(file, "r");
-	total_lines = 0;
-	if (fp) {
-		while (fgets(line, sizeof(line), fp) && total_lines < MAX_LINES) {
-			mvwprintw(pad, total_lines, 0, "%s", line);
-			total_lines++;
-		}
-		fclose(fp);
-	} else {
-		wprintw(pad, "File not found.");
-	}
 
+	total_lines  = tui_write_file(t1, fp);
 	int current_line = 0;
 	ch = 0;
 
-	prefresh(pad, current_line, 0, 2, 2, LINES - 3, COLS-3);
-
+	refresh();
 	// 3. Event Loop for Scrolling
 	while ((ch = getch()) != 'q') {
 		switch (ch) {
@@ -212,12 +195,11 @@ int main(int argc, char *argv[]) {
 
 		// 4. Refresh the Pad
 		// prefresh(pad, pad_row, pad_col, screen_y1, screen_x1, screen_y2, screen_x2)
-		prefresh(pad, current_line, 0, 2, 2, LINES - 3, COLS-3);
+		prefresh(t1->w, current_line, 0, 2, 2, LINES - 3, COLS-3);
 	}
 
-	delwin(pad);
+	delwin(t1->w);
 	endwin();
 	return 0;
-#endif
 }
 

@@ -38,6 +38,13 @@ void tui_write_line(struct tui_window *t, char *line, int n, int start, bool hig
  */
 void tui_write_lines(struct tui_window *t, char *lines, int line_width, size_t n, int offset, int start);
 
+/**
+ * write file contents to window.
+ * return lines.
+ */
+int tui_write_file(struct tui_window *t, FILE* fp);
+
+
 /** 
  * scroll up or down `count` lines in a window `w`.
  */
