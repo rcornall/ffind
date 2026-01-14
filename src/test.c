@@ -3,32 +3,65 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <tui.h>
+
 #define PREVIEW_HEIGHT 10
-#define PREVIEW_WIDTH 50
+#define PREVIEW_WIDTH 70
 #define MAX_LINES 1000  // Maximum lines the pad can hold
 //#define PREVIEW_WIDTH 30
+//
 
-void display_file_preview(WINDOW *win, const char *filename) {
-	FILE *fp = fopen(filename, "r");
-	if (fp == NULL) {
-		mvwprintw(win, 1, 2, "Error: Could not open %s", filename);
-		return;
-	}
 
-	char buffer[256];
-	int line_num = 1;
-	int max_y, max_x;
-	getmaxyx(win, max_y, max_x);
-
-	// Read the file line by line and print to the window
-	// Leave space for the border (line 1 to max_y-2)
-	while (fgets(buffer, sizeof(buffer), fp) && line_num < max_y - 1) {
-		mvwprintw(win, line_num, 2, "%.*s", max_x - 4, buffer);
-		line_num++;
-	}
-
-	fclose(fp);
-}
+/*
+ * I want to store first rg contents.
+ *
+ * +-----------------------+
+ * | rg_results[max_lines] |
+ * +-----------------------+
+ *
+ * apply filter on this result list:
+ *
+ * +------------------------------------+
+ * | tmp_filtered_rg_results[max_lines] |
+ * +------------------------------------+
+ *
+ * hit enter to start new filtering on the filtered list:
+ *
+ * +------------------------------------+
+ * | struct.filtered_rg_results[max_lines]     | <- tmp_filtered_results (copy, or move ).
+ * +------------------------------------+
+ *
+ * filter again:
+ * +------------------------------------+
+ * | tmp_filtered_rg_results[max_lines] |
+ * +------------------------------------+
+ *
+ * hit enter to start new filtering on the filtered list:
+ * At this point we could overwrite the last filtered_results buffer,
+ * or we can allow for jumping back (undo) by allocate new one.
+ *
+ * +---------------------------------------------+
+ * | tmp = malloc(strut)
+ * | struct->next = tmp;
+ * | struct->next.filtered_rg_results[max_lines] | <- tmp_filtered_results (copy, or move ).
+ * +---------------------------------------------+
+ *
+ * undo pops the last one off.
+ *
+ * select a line in the results, to open it or preview it.
+ * hit g to open git blame next to it.
+ *
+ * what else.
+ *
+ * 	- preview selected entry.
+ * 	- execute arbitrary cmd on all in list. (xargs).
+ * 	- put the list into a file
+ * 	- select lines: open them in vim?
+	 * 	- open vim, but allow to close it back to the list afterwards. possibly in a pad floating window.
+ * 	- rename all instances (sed)
+ *
+ * +
+ */
 
 
 int main(int argc, char *argv[]) {
@@ -56,7 +89,6 @@ int main(int argc, char *argv[]) {
 
 	char cmd[100] = {0};
 	snprintf(cmd, sizeof(cmd), "/bin/rg --vimgrep %s . 2>&1", search);
-	//printf("%s\n", cmd);
 	// get the grep output
 	FILE *fp = popen(cmd, "r");
 	if (fp == NULL) {
@@ -64,45 +96,45 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
-
-	initscr();
-	cbreak();
-	noecho();
-	keypad(stdscr, TRUE); // Enable arrow keys and others
-	curs_set(0);
-
-	// 1. Create a Pad instead of a Window
-	// A pad is (Height, Width). We make it tall enough for the file.
-	WINDOW *pad = newpad(MAX_LINES, PREVIEW_WIDTH);
-
-	// getch does implicit refresh which messes with pad.
-	// refresh here so getch doesnt clear pad window.
-	refresh();
+	struct tui_window *t1 = tui_init(false, MAX_LINES, PREVIEW_WIDTH,
+					 0,0,0,0);
 
 	char line[256];
 	char results[1000][256];
 	int total_lines = 0;
 	while (fgets(line, sizeof(line), fp) && total_lines < MAX_LINES) {
-		//printf("%s\n", line);
-		mvwprintw(pad, total_lines, 0, "%s", line);
 		strncpy(results[total_lines], line, sizeof(line));
 		total_lines++;
 	}
 	fclose(fp);
 	fp = NULL;
 
-	prefresh(pad, 0, 0, 2, 2, LINES-3, COLS-3);
+	// printf("write: %d, %s\n", total_lines, &((char*)results)[256*2]);
+	tui_write_line(t1, results[0], 0, -1, true);
+	tui_write_lines(t1, (char*)(results[1]), sizeof(results[0]), total_lines-1, 1, 0);
+
 
 	int curr_line=0;
 	int sel_line=0;
 	int ch;
 	char *file;
 	int found =0;
+
+	while ((ch = getch()) != 'q') {
+		tui_write_line(t1, "test", 2, -1, false);
+	}
+#if 0
 	while ((ch = getch()) != 'q' && (found == 0)) {
 		switch (ch) {
 		// let user scroll lines and select one:
 			case 'j':
+				// clear previous line color first.
+				mvwprintw(pad, sel_line, 0, "TSET %s", results[sel_line]);
 				sel_line++;
+				wattron(pad, COLOR_PAIR(1));
+				mvwprintw(pad, sel_line, 0, "TSET %s", results[sel_line]);
+				wattroff(pad, COLOR_PAIR(1));
+				prefresh(pad, 0, 0, 2, 2, LINES-3, COLS-3);
 				break;
 			case 'k':
 				sel_line--;
@@ -186,5 +218,6 @@ int main(int argc, char *argv[]) {
 	delwin(pad);
 	endwin();
 	return 0;
+#endif
 }
 
