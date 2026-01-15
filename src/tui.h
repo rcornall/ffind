@@ -1,6 +1,5 @@
 /**
- * @file
- * @brief Terminal UI support api.
+ * Terminal UI support api.
  */
 
 #include <ncurses.h>

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 struct local_env {
+	bool init;
 	int highlight_color;
 };
 
@@ -15,24 +16,29 @@ static struct local_env env;
 struct tui_window* tui_init(bool autosize, int cols, int rows,
 			    int x1, int x2, int y1, int y2)
 {
+	if (env.init == false) {
+		initscr();
+		cbreak();
+		noecho();
+		keypad(stdscr, TRUE); // Enable arrow keys and others
+		curs_set(0);
+		env.highlight_color = 1;
+
+		start_color();
+		init_pair(env.highlight_color, COLOR_WHITE, COLOR_BLUE);
+	}
+
 	struct tui_window* t = malloc(sizeof(struct tui_window));
 	if (t == NULL)
 		return NULL;
 
-	initscr();
-	cbreak();
-	noecho();
-	keypad(stdscr, TRUE); // Enable arrow keys and others
-	curs_set(0);
-
-	env.highlight_color = 1;
-
-	start_color();
-	init_pair(env.highlight_color, COLOR_WHITE, COLOR_BLUE);
-
 	// 1. Create a Pad instead of a Window
 	// A pad is (Height, Width). We make it tall enough for the file.
 	WINDOW *pad = newpad(cols, rows);
+	if (pad == NULL) {
+		free(t);
+		return NULL;
+	}
 
 	// getch does implicit refresh which messes with pad.
 	// refresh here so getch doesnt clear pad window.
@@ -58,6 +64,8 @@ void tui_destroy(struct tui_window* t)
 		free(t);
 		t=NULL;
 	}
+
+	// refresh?
 }
 
 void tui_write_line(struct tui_window *t, char *line, int n, int start, bool highlight)
@@ -98,6 +106,7 @@ int tui_write_file(struct tui_window *t, FILE* fp)
 		return 0;
 	}
 
+	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
 	return total_lines;
 }
 
