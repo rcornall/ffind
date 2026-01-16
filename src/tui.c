@@ -91,8 +91,10 @@ void tui_write_lines(struct tui_window *t, char *lines, int line_width, size_t n
 	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
 }
 
-int tui_write_file(struct tui_window *t, FILE* fp)
+int tui_write_file(struct tui_window *t, char *file)
 {
+	FILE* fp = fopen(file, "r");
+
 	char line[256];
 	int total_lines = 0;
 	if (fp) {
@@ -100,11 +102,15 @@ int tui_write_file(struct tui_window *t, FILE* fp)
 			mvwprintw(t->w, total_lines, 0, "%s", line);
 			total_lines++;
 		}
-		fclose(fp);
 	} else {
 		wprintw(t->w, "File not found.");
+		fclose(fp);
+		fp = NULL;
 		return 0;
 	}
+
+	fclose(fp);
+	fp = NULL;
 
 	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
 	return total_lines;

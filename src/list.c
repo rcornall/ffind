@@ -5,6 +5,8 @@
 #include <list.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <errno.h>
 
 struct list* list_init(void)
 {
@@ -49,6 +51,26 @@ void list_drop(struct list* l)
 
 	free(tmp);
 	last->next = NULL;
+}
+
+int list_popen(struct list *l, char *cmd)
+{
+	FILE *fp = popen(cmd, "r");
+	if (fp == NULL) {
+		printf("Failed to run: %s: %s\n", cmd, strerror(errno));
+		return -1;
+	}
+
+	char line[256];
+	int total_lines = 0;
+	while (fgets(line, sizeof(line), fp) && total_lines < MAX_LINES) {
+		strncpy(l->buf[total_lines], line, sizeof(line));
+		total_lines++;
+	}
+	fclose(fp);
+	fp = NULL;
+
+	return total_lines;
 }
 
 void list_destroy(struct list* l)

@@ -6,6 +6,8 @@
  * | next -> |
  */
 
+#define MAX_LINES 1024
+
 struct string_buf {
 	char **buf;
 	int n;
@@ -15,7 +17,7 @@ struct string_buf {
 struct list {
 	struct list* next;
 	struct string_buf s;
-	char buf[1024][256]; // TODO dynamic.
+	char buf[MAX_LINES][256]; // TODO dynamic.
 };
 
 /**
@@ -34,7 +36,12 @@ struct list* list_push(struct list* l);
 void list_drop(struct list* l);
 
 /**
- * destroy list
+ * Run cmd and fill list buf with stdoutput.
+ */
+int list_popen(struct list *l, char *cmd);
+
+/**
+ * destroy list.
  */
 void list_destroy(struct list* l);
 

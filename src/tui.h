@@ -41,7 +41,7 @@ void tui_write_lines(struct tui_window *t, char *lines, int line_width, size_t n
  * write file contents to window.
  * return lines.
  */
-int tui_write_file(struct tui_window *t, FILE* fp);
+int tui_write_file(struct tui_window *t, char *fp);
 
 
 /** 

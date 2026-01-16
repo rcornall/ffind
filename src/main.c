@@ -4,10 +4,10 @@
 #include <unistd.h>
 
 #include <tui.h>
+#include <list.h>
 
 #define PREVIEW_HEIGHT 10
 #define PREVIEW_WIDTH 90
-#define MAX_LINES 1000  // Maximum lines the pad can hold
 //#define PREVIEW_WIDTH 30
 //
 
@@ -87,31 +87,18 @@ int main(int argc, char *argv[]) {
 		search = argv[optind];
 	}
 
-	char cmd[100] = {0};
-	snprintf(cmd, sizeof(cmd), "/bin/rg --vimgrep %s . 2>&1", search);
-	// get the grep output
-	FILE *fp = popen(cmd, "r");
-	if (fp == NULL) {
-		printf("Failed to run rg\n");
-		exit(1);
-	}
-
 	struct tui_window *t1 = tui_init(false, MAX_LINES, PREVIEW_WIDTH,
 					 0,0,0,0);
 
-	char line[256];
-	char results[1000][256];
-	int total_lines = 0;
-	while (fgets(line, sizeof(line), fp) && total_lines < MAX_LINES) {
-		strncpy(results[total_lines], line, sizeof(line));
-		total_lines++;
-	}
-	fclose(fp);
-	fp = NULL;
+	struct list *l = list_init();
+
+	char cmd[100] = {0};
+	snprintf(cmd, sizeof(cmd), "/bin/rg --vimgrep %s . 2>&1", search);
+	int total_lines = list_popen(l, cmd);
 
 	// printf("write: %d, %s\n", total_lines, &((char*)results)[256*2]);
-	tui_write_line(t1, results[0], 0, -1, true);
-	tui_write_lines(t1, (char*)(results[1]), sizeof(results[0]), total_lines-1, 1, 0);
+	tui_write_line(t1, l->buf[0], 0, -1, true);
+	tui_write_lines(t1, (char*)(l->buf[1]), sizeof(l->buf[0]), total_lines-1, 1, 0);
 
 
 	int curr_line=0;
@@ -125,24 +112,24 @@ int main(int argc, char *argv[]) {
 		// let user scroll lines and select one:
 			case 'j':
 				// clear previous line color first.
-				tui_write_line(t1, results[sel_line], sel_line, -1, false);
+				tui_write_line(t1, l->buf[sel_line], sel_line, -1, false);
 				sel_line++;
-				tui_write_line(t1, results[sel_line], sel_line, -1, true);
+				tui_write_line(t1, l->buf[sel_line], sel_line, -1, true);
 				// tui_scroll_down(t1, 1);
 				break;
 			case 'k':
-				tui_write_line(t1, results[sel_line], sel_line, -1, false);
+				tui_write_line(t1, l->buf[sel_line], sel_line, -1, false);
 				sel_line--;
-				tui_write_line(t1, results[sel_line], sel_line, -1, true);
+				tui_write_line(t1, l->buf[sel_line], sel_line, -1, true);
 				break;
 			case '\r':
 			case '\n': {
 				// find the file and open it:
-				char *tmp = strchr(results[sel_line], ':');
-				results[sel_line][tmp-results[sel_line]] = '\0';
-				// printf("%d: %s\n", tmp-results[sel_line], results[sel_line]);
+				char *tmp = strchr(l->buf[sel_line], ':');
+				l->buf[sel_line][tmp-l->buf[sel_line]] = '\0';
+				// printf("%d: %s\n", tmp-l->buf[sel_line], l->buf[sel_line]);
 				found=1;
-				file = results[sel_line];
+				file = l->buf[sel_line];
 			} break;
 
 		// let user enter fuzzy filter om lines
@@ -152,11 +139,12 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+	// add new window
+	struct tui_window *t2 = tui_init(false, MAX_LINES, PREVIEW_WIDTH,
+					 0,0,0,0);
 
 	// 2. Load file into the Pad
-	fp = fopen(file, "r");
-
-	total_lines  = tui_write_file(t1, fp);
+	total_lines  = tui_write_file(t2, file);
 	int current_line = 0;
 	ch = 0;
 
@@ -194,10 +182,14 @@ int main(int argc, char *argv[]) {
 
 		// 4. Refresh the Pad
 		// prefresh(pad, pad_row, pad_col, screen_y1, screen_x1, screen_y2, screen_x2)
-		prefresh(t1->w, current_line, 0, 2, 2, LINES - 3, COLS-3);
+		prefresh(t2->w, current_line, 0, 2, 2, LINES - 3, COLS-3);
 	}
 
-	delwin(t1->w);
+	delwin(t2->w);
+
+	prefresh(t1->w, current_line, 0, 2, 2, LINES - 3, COLS-3);
+
+	while(true) {}
 	endwin();
 	return 0;
 }
