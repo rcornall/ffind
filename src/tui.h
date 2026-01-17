@@ -3,6 +3,7 @@
  */
 
 #include <ncurses.h>
+#include <list.h>
 
 struct tui_window {
 	WINDOW* w;
@@ -15,6 +16,9 @@ struct tui_window {
 	int y1;
 	int x2;
 	int y2;
+
+	/* reference to a list */
+	struct list *l;
 };
 
 /*
@@ -40,6 +44,8 @@ void tui_write_lines(struct tui_window *t, char *lines, int line_width, size_t n
 /**
  * write file contents to window.
  * return lines.
+ *
+ * note: contents are "lost". unless we can access pad internal buf. otherwise list.
  */
 int tui_write_file(struct tui_window *t, char *fp);
 
