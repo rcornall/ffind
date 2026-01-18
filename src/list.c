@@ -16,6 +16,15 @@ struct list* list_init(void)
 		return NULL;
 
 	memset(l, 0, sizeof(struct list));
+	// line 0 is filter line.
+	l->sel_line = 1;
+	l->filter_len = sizeof("filter: ") - 1;
+	strncpy(l->filter, "filter: ", sizeof("filter: "));
+
+	for (int i = 0; i < MAX_LINES-1; i++) {
+		l->buf[i][MAX_LINE_LEN] |= 0x1;
+		l->map_filtered_to_line[i+1] = i;
+	}
 
 	l->next = NULL;
 

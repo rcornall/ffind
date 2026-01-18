@@ -61,6 +61,9 @@
  * +
  */
 
+struct {
+} env;
+
 /* simple subsequent fuzzy matching */
 bool fuzzy_match(const char *text, const char *pat) {
 	while (*text && *pat) {
@@ -86,23 +89,10 @@ void debug(struct tui_window *t1, const char *fmt, ...)
 
 char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 {
-	int sel_line=0;
 	char *file = NULL;
-	int map_line_to_filter[MAX_LINES] = {0};
 	bool found = 0;
 	unsigned char ch;
 
-	while (sel_line < total_lines) {
-		// init defaults
-		l->buf[sel_line][MAX_LINE_LEN] |= 0x1;
-		map_line_to_filter[sel_line+1] = sel_line;
-		sel_line++;
-	}
-	sel_line = 1;
-
-
-	char filter[100] = "filter: ";
-	int filter_len = strlen(filter);
 	while ((found == false) && (read(STDIN_FILENO, &ch, 1) == 1)) {
 		switch (ch) {
 		// let user scroll lines and select one:
@@ -110,100 +100,61 @@ char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 			// ctrl-j
 			case '\n': {
 				// clear previous line color first.
-				int i = 0;
-				int i_prev = 0;
-				int match = 0;
-				while (match <= sel_line) {
-					if (l->buf[i][MAX_LINE_LEN] & 0x1) {
-						match++;
-						if (match == sel_line) {
-							i_prev = i;
-						} else if (match > sel_line) {
-							break;
-						}
-					}
-					i++;
-				}
-				debug(t1, "i: %d, i_prev: %d\n", i, i_prev);
-				tui_write_line(t1, l->buf[i_prev], sel_line, -1, false);
-				sel_line++;
-				tui_write_line(t1, l->buf[i], sel_line, -1, true);
+				tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, false);
+				l->sel_line++;
+				tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, true);
 				// tui_scroll_down(t1, 1);
 			} break;
 
 			// ctrl-k
 			case '': {
 				// clear previous line color first.
-				int i = 0;
-				int i_prev = 0;
-				int match = 0;
-				while (match <= sel_line-1) {
-					if (l->buf[i][MAX_LINE_LEN] & 0x1) {
-						match++;
-						if (match == sel_line-1) {
-							i_prev = i;
-						} else if (match > sel_line-1) {
-							break;
-						}
-					}
-					i++;
-				}
-				tui_write_line(t1, l->buf[map_line_to_filter[sel_line]], sel_line, -1, false);
-				sel_line--;
-				tui_write_line(t1, l->buf[map_line_to_filter[sel_line]], sel_line, -1, true);
-			} break;
-			case '\r':{ // enter
-				// find the file and open it:
-				int i = 0;
-				int match = 0;
-				while (match <= sel_line-1) {
-					if (l->buf[i][MAX_LINE_LEN] & 0x1) {
-						match++;
-						if (match == sel_line) {
-							break;
-						}
-					}
-					i++;
-				}
-				char *tmp = strchr(l->buf[i], ':');
-				tmp = strchr(tmp+1, ':');
-				l->buf[i][tmp-l->buf[i]] = '\0';
-				// printf("%d: %s\n", tmp-l->buf[sel_line], l->buf[sel_line]);
-				found=true;
-				file = l->buf[i];
+				tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, false);
+				l->sel_line--;
+				tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, true);
 			} break;
 
-		// let user enter fuzzy filter om lines
-		// let user enter to takes current filtered results as the new search list. so to make further searches on this list.
+			// enter
+			case '\r':{
+				// find the file and open it:
+				char *tmp = strchr(l->buf[l->map_filtered_to_line[l->sel_line]], ':');
+				tmp = strchr(tmp+1, ':');
+				l->buf[l->map_filtered_to_line[l->sel_line]][tmp-l->buf[l->map_filtered_to_line[l->sel_line]]] = '\0';
+				file = l->buf[l->map_filtered_to_line[l->sel_line]];
+				found=true;
+			} break;
+
+			// let user enter fuzzy filter om lines
+			// let user enter to takes current filtered results as the new search list. so to make further searches on this list.
 			default:
 				if (ch >= 32 && ch <= 127) {
 					if (ch == 127 || ch == 8) { // backspace
-						if (filter_len > (sizeof("filter: ")-1)) {
-							filter_len--;
-							filter[filter_len] = '\0';
+						if (l->filter_len > (sizeof("filter: ")-1)) {
+							l->filter_len--;
+							l->filter[l->filter_len] = '\0';
 						}
 					} else {
 						// append to filter string
-						size_t len = strnlen(filter, sizeof(filter));
-						if (len < sizeof(filter) - 1) {
-							filter[filter_len] = ch;
-							filter[filter_len + 1] = '\0';
-							filter_len++;
+						size_t len = strnlen(l->filter, sizeof(l->filter));
+						if (len < sizeof(l->filter) - 1) {
+							l->filter[l->filter_len] = ch;
+							l->filter[l->filter_len + 1] = '\0';
+							l->filter_len++;
 						}
 					}
 					// print filter string
 					tui_clear_line(t1, 0, -1);
-					tui_write_line(t1, filter, 0, -1, false);
+					tui_write_line(t1, l->filter, 0, -1, false);
 
 					// filter the list
 					int line_no = 1;
 					int i = 0;
 					while (i < total_lines) {
-						if (fuzzy_match(l->buf[i], &filter[sizeof("filter: ")-1])) {
+						if (fuzzy_match(l->buf[i], &l->filter[sizeof("filter: ")-1])) {
 							l->buf[i][MAX_LINE_LEN] |= 0x1; // mark as matched
 							// print matched line
-							tui_write_line(t1, l->buf[i], line_no, -1, (line_no == sel_line ? true : false));
-							map_line_to_filter[line_no] = i;
+							tui_write_line(t1, l->buf[i], line_no, -1, (line_no == l->sel_line ? true : false));
+							l->map_filtered_to_line[line_no] = i;
 							line_no++;
 						} else {
 							l->buf[i][MAX_LINE_LEN] &= ~0x1; // unmark
@@ -254,6 +205,10 @@ int main(int argc, char *argv[])
 	}
 
 	struct list *l = list_init();
+	if (!l) {
+		printf("Failed to create list.\n");
+		return -1;
+	}
 
 	char cmd[200] = {0};
 	snprintf(cmd, sizeof(cmd), "/bin/rg --no-ignore --vimgrep %s . 2>&1 | sort -r", search);

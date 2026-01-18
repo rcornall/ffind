@@ -6,8 +6,8 @@
  * | next -> |
  */
 
-#define MAX_LINES 15000
-#define MAX_LINE_LEN 2560
+#define MAX_LINES 10000
+#define MAX_LINE_LEN 200
 #define MAX_FILTERS 16
 
 struct string_buf {
@@ -20,6 +20,11 @@ struct list {
 	struct list* next;
 	struct string_buf s;
 	char buf[MAX_LINES][MAX_LINE_LEN + MAX_FILTERS]; // TODO dynamic.
+	int map_filtered_to_line[MAX_LINES];
+	// selected line during filtering
+	int sel_line;
+	char filter[100];
+	int filter_len;
 };
 
 /**
