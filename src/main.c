@@ -71,38 +71,106 @@ bool fuzzy_match(const char *text, const char *pat) {
 	return *pat == '\0';
 }
 
+void debug(struct tui_window *t1, const char *fmt, ...)
+{
+	/* print to last line in tui window or LINES row */
+	va_list args;
+	va_start(args, fmt);
+	/* tui_write_line(t1, "                                                                                ", */
+			   /* LINES - 4, -1, false); */
+	char buf[256];
+	vsnprintf(buf, sizeof(buf), fmt, args);
+	tui_write_line(t1, buf, LINES - 4, -1, false);
+	va_end(args);
+}
+
 char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 {
 	int sel_line=0;
 	char *file = NULL;
+	int map_line_to_filter[MAX_LINES] = {0};
 	bool found = 0;
 	unsigned char ch;
 
+	while (sel_line < total_lines) {
+		// init defaults
+		l->buf[sel_line][MAX_LINE_LEN] |= 0x1;
+		map_line_to_filter[sel_line+1] = sel_line;
+		sel_line++;
+	}
+	sel_line = 1;
 
-	char filter[100] = {0};
-	int filter_len = 0;
-	while ((read(STDIN_FILENO, &ch, 1) == 1) && ch != 'q' && (found == false)) {
+
+	char filter[100] = "filter: ";
+	int filter_len = strlen(filter);
+	while ((found == false) && (read(STDIN_FILENO, &ch, 1) == 1)) {
 		switch (ch) {
 		// let user scroll lines and select one:
-			case '\n':
+
+			// ctrl-j
+			case '\n': {
 				// clear previous line color first.
-				tui_write_line(t1, l->buf[sel_line], sel_line, -1, false);
+				int i = 0;
+				int i_prev = 0;
+				int match = 0;
+				while (match <= sel_line) {
+					if (l->buf[i][MAX_LINE_LEN] & 0x1) {
+						match++;
+						if (match == sel_line) {
+							i_prev = i;
+						} else if (match > sel_line) {
+							break;
+						}
+					}
+					i++;
+				}
+				debug(t1, "i: %d, i_prev: %d\n", i, i_prev);
+				tui_write_line(t1, l->buf[i_prev], sel_line, -1, false);
 				sel_line++;
-				tui_write_line(t1, l->buf[sel_line], sel_line, -1, true);
+				tui_write_line(t1, l->buf[i], sel_line, -1, true);
 				// tui_scroll_down(t1, 1);
-				break;
-			case '':
-				tui_write_line(t1, l->buf[sel_line], sel_line, -1, false);
+			} break;
+
+			// ctrl-k
+			case '': {
+				// clear previous line color first.
+				int i = 0;
+				int i_prev = 0;
+				int match = 0;
+				while (match <= sel_line-1) {
+					if (l->buf[i][MAX_LINE_LEN] & 0x1) {
+						match++;
+						if (match == sel_line-1) {
+							i_prev = i;
+						} else if (match > sel_line-1) {
+							break;
+						}
+					}
+					i++;
+				}
+				tui_write_line(t1, l->buf[map_line_to_filter[sel_line]], sel_line, -1, false);
 				sel_line--;
-				tui_write_line(t1, l->buf[sel_line], sel_line, -1, true);
-				break;
-			case '\r':{
+				tui_write_line(t1, l->buf[map_line_to_filter[sel_line]], sel_line, -1, true);
+			} break;
+			case '\r':{ // enter
 				// find the file and open it:
-				char *tmp = strchr(l->buf[sel_line], ':');
-				l->buf[sel_line][tmp-l->buf[sel_line]] = '\0';
+				int i = 0;
+				int match = 0;
+				while (match <= sel_line-1) {
+					if (l->buf[i][MAX_LINE_LEN] & 0x1) {
+						match++;
+						if (match == sel_line) {
+							break;
+						}
+					}
+					i++;
+				}
+				char *tmp = strchr(l->buf[i], ':');
+				tmp = strchr(tmp+1, ':');
+				l->buf[i][tmp-l->buf[i]] = '\0';
 				// printf("%d: %s\n", tmp-l->buf[sel_line], l->buf[sel_line]);
 				found=true;
-				file = l->buf[sel_line];
+				file = l->buf[i];
 			} break;
 
 		// let user enter fuzzy filter om lines
@@ -110,7 +178,7 @@ char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 			default:
 				if (ch >= 32 && ch <= 127) {
 					if (ch == 127 || ch == 8) { // backspace
-						if (filter_len > 0) {
+						if (filter_len > (sizeof("filter: ")-1)) {
 							filter_len--;
 							filter[filter_len] = '\0';
 						}
@@ -131,10 +199,14 @@ char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 					int line_no = 1;
 					int i = 0;
 					while (i < total_lines) {
-						if (fuzzy_match(l->buf[i], filter)) {
+						if (fuzzy_match(l->buf[i], &filter[sizeof("filter: ")-1])) {
+							l->buf[i][MAX_LINE_LEN] |= 0x1; // mark as matched
 							// print matched line
-							tui_write_line(t1, l->buf[i], line_no, -1, false);
+							tui_write_line(t1, l->buf[i], line_no, -1, (line_no == sel_line ? true : false));
+							map_line_to_filter[line_no] = i;
 							line_no++;
+						} else {
+							l->buf[i][MAX_LINE_LEN] &= ~0x1; // unmark
 						}
 						i++;
 					}
@@ -192,12 +264,36 @@ int main(int argc, char *argv[])
 	struct tui_window *t1 = tui_init(false, MAX_LINES, PREVIEW_WIDTH,
 					 0,0,0,0);
 
-	tui_write_line(t1, l->buf[0], 0, -1, true);
-	tui_write_lines(t1, (char*)(l->buf[1]), sizeof(l->buf[0]), total_lines-1, 1, -1);
+	tui_write_line(t1, "filter: ", 0, -1, false);
+	tui_write_line(t1, l->buf[0], 1, -1, true);
+	tui_write_lines(t1, (char*)(l->buf[1]), sizeof(l->buf[0]), total_lines-1, 2, -1);
 
 	while (true) {
 		char * file = interactive_filter(t1, l, total_lines);
+		// get line number
+		char *tmp = strchr(file, ':');
+		int line_number = atoi(tmp+1);
+		file[tmp-file] = '\0';
+
 		if (file) {
+#define VIM
+#ifdef VIM
+			// open file in vim
+			char vim_cmd[256];
+			snprintf(vim_cmd, sizeof(vim_cmd), "vim -c 'set noswapfile' +'%s' %s +%d", "normal! zz", file, line_number);
+			endwin();
+			system(vim_cmd);
+			initscr();
+			cbreak();
+			noecho();
+			keypad(stdscr, TRUE); // Enable arrow keys and others
+			curs_set(0);
+
+			start_color();
+			prefresh(t1->w, 0, 0, 2, 2, LINES - 3, COLS-3);
+
+
+#else
 			// add new window
 			struct tui_window *t2 = tui_init(false, MAX_LINES, PREVIEW_WIDTH,
 							 0,0,0,0);
@@ -246,6 +342,7 @@ int main(int argc, char *argv[])
 			// back to interactive filter
 			delwin(t2->w);
 			prefresh(t1->w, 0, 0, 2, 2, LINES - 3, COLS-3);
+#endif
 		} else {
 			printf("No file selected, exiting.\n");
 		}

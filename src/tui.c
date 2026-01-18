@@ -50,8 +50,8 @@ struct tui_window* tui_init(bool autosize, int cols, int rows,
 	t->x1 = 2;
 	t->y1 = 2;
 	/* todo reversed */
-	t->x2 = LINES-3;
-	t->y2 = COLS-3;
+	t->x2 = LINES-6;
+	t->y2 = COLS-6;
 
 	return t;
 }
