@@ -81,6 +81,17 @@ void tui_write_line(struct tui_window *t, char *line, int n, int start, bool hig
 	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
 }
 
+void tui_clear_line(struct tui_window *t, int n, int start)
+{
+	wmove(t->w, n, 0);
+	wclrtoeol(t->w);
+
+	if (start >= 0)
+		t->curr_row = start;
+
+	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
+}
+
 void tui_write_lines(struct tui_window *t, char *lines, int line_width, size_t n, int offset, int start)
 {
 	for (int i=offset; i< n; i++) {

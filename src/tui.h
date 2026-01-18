@@ -32,6 +32,8 @@ void tui_destroy(struct tui_window* t);
  */
 void tui_write_line(struct tui_window *t, char *line, int n, int start, bool highlight);
 
+void tui_clear_line(struct tui_window *t, int n, int start);
+
 /**
  * write `n` lines from `lines` to the window and refresh from `start` line.
  */

@@ -1,10 +1,13 @@
 #include <ncurses.h>
+#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include <tui.h>
 #include <list.h>
+
+#include <termios.h>
 
 #define PREVIEW_HEIGHT 10
 #define PREVIEW_WIDTH 90
@@ -63,8 +66,24 @@
  * +
  */
 
+/* simple subsequent fuzzy matching */
+bool fuzzy_match(const char *text, const char *pat) {
+	while (*text && *pat) {
+		if (*text == *pat)
+			pat++;
+		text++;
+	}
+	return *pat == '\0';
+}
 
 int main(int argc, char *argv[]) {
+	// setup terminal raw
+	struct termios old;
+	tcgetattr(STDIN_FILENO, &old);
+	old.c_lflag &= ~(ICANON | ECHO);
+	old.c_iflag &= ~(ICRNL); // allow detecting enter vs ctrl-j
+	tcsetattr(STDIN_FILENO, TCSANOW, &old);
+
 	char *search;
 	int opt;
 	// The option string "a:b" indicates that 'a' requires an argument, 'b' does not
@@ -87,54 +106,88 @@ int main(int argc, char *argv[]) {
 		search = argv[optind];
 	}
 
-	struct tui_window *t1 = tui_init(false, MAX_LINES, PREVIEW_WIDTH,
-					 0,0,0,0);
-
 	struct list *l = list_init();
 
 	char cmd[100] = {0};
 	snprintf(cmd, sizeof(cmd), "/bin/rg --vimgrep %s . 2>&1", search);
 	int total_lines = list_popen(l, cmd);
 
-	// printf("write: %d, %s\n", total_lines, &((char*)results)[256*2]);
+	struct tui_window *t1 = tui_init(false, MAX_LINES, PREVIEW_WIDTH,
+					 0,0,0,0);
+
 	tui_write_line(t1, l->buf[0], 0, -1, true);
 	tui_write_lines(t1, (char*)(l->buf[1]), sizeof(l->buf[0]), total_lines-1, 1, 0);
 
-
-	int curr_line=0;
 	int sel_line=0;
-	int ch;
 	char *file;
-	int found =0;
+	bool found = 0;
+	unsigned char ch;
 
-	while ((ch = getch()) != 'q' && (found == 0)) {
+
+	memset(cmd, 0, sizeof(cmd));
+	int cmd_len = 0;
+	while ((read(STDIN_FILENO, &ch, 1) == 1) && ch != 'q' && (found == false)) {
 		switch (ch) {
 		// let user scroll lines and select one:
-			case 'j':
+			case '\n':
 				// clear previous line color first.
 				tui_write_line(t1, l->buf[sel_line], sel_line, -1, false);
 				sel_line++;
 				tui_write_line(t1, l->buf[sel_line], sel_line, -1, true);
 				// tui_scroll_down(t1, 1);
 				break;
-			case 'k':
+			case '':
 				tui_write_line(t1, l->buf[sel_line], sel_line, -1, false);
 				sel_line--;
 				tui_write_line(t1, l->buf[sel_line], sel_line, -1, true);
 				break;
-			case '\r':
-			case '\n': {
+			case '\r':{
 				// find the file and open it:
 				char *tmp = strchr(l->buf[sel_line], ':');
 				l->buf[sel_line][tmp-l->buf[sel_line]] = '\0';
 				// printf("%d: %s\n", tmp-l->buf[sel_line], l->buf[sel_line]);
-				found=1;
+				found=true;
 				file = l->buf[sel_line];
 			} break;
 
 		// let user enter fuzzy filter om lines
 		// let user enter to takes current filtered results as the new search list. so to make further searches on this list.
 			default:
+				if (ch >= 32 && ch <= 127) {
+					if (ch == 127 || ch == 8) { // backspace
+						if (cmd_len > 0) {
+							cmd_len--;
+							cmd[cmd_len] = '\0';
+						}
+					} else {
+						// append to filter string
+						size_t len = strnlen(cmd, sizeof(cmd));
+						if (len < sizeof(cmd) - 1) {
+							cmd[cmd_len] = ch;
+							cmd[cmd_len + 1] = '\0';
+							cmd_len++;
+						}
+					}
+					// print filter string
+					tui_clear_line(t1, 0, -1);
+					tui_write_line(t1, cmd, 0, -1, false);
+
+					// filter the list
+					int line_no = 1;
+					int i = 0;
+					while (i < total_lines) {
+						if (fuzzy_match(l->buf[i], cmd)) {
+							// print matched line
+							tui_write_line(t1, l->buf[i], line_no, -1, false);
+							line_no++;
+						}
+						i++;
+					}
+					// clear remaining lines
+					for (int i = line_no; i < total_lines-1; i++) {
+						tui_clear_line(t1, i, -1);
+					}
+				}
 				break;
 		}
 	}
@@ -149,14 +202,14 @@ int main(int argc, char *argv[]) {
 	ch = 0;
 
 	// 3. Event Loop for Scrolling
-	while ((ch = getch()) != 'q') {
+	while ((read(STDIN_FILENO, &ch, 1) == 1) && ch != 'q') {
 		switch (ch) {
 			case 'j': // Vim down
-			case KEY_DOWN:
+			/* case KEY_DOWN: */
 				if (current_line < total_lines-2) current_line++;
 				break;
 			case 'k': // Vim up
-			case KEY_UP:
+			/* case KEY_UP: */
 				if (current_line > 0) current_line--;
 				break;
 			case 'd': // Vim down more
@@ -187,7 +240,7 @@ int main(int argc, char *argv[]) {
 
 	delwin(t2->w);
 
-	prefresh(t1->w, current_line, 0, 2, 2, LINES - 3, COLS-3);
+	prefresh(t1->w, 0, 0, 2, 2, LINES - 3, COLS-3);
 
 	while(true) {}
 	endwin();

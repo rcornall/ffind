@@ -6,7 +6,7 @@
  * | next -> |
  */
 
-#define MAX_LINES 1024
+#define MAX_LINES 15000
 
 struct string_buf {
 	char **buf;
