@@ -28,7 +28,7 @@ struct tui_window* tui_init(bool autosize, int cols, int rows,
 void tui_destroy(struct tui_window* t);
 
 /**
- * write line to the window and refresh from `start` line.
+ * write line to the window at `n` and refresh from `start` row.
  */
 void tui_write_line(struct tui_window *t, char *line, int n, int start, bool highlight);
 
@@ -37,7 +37,7 @@ void tui_clear_line(struct tui_window *t, int n, int start);
 /**
  * write `n` lines from `lines` to the window and refresh from `start` line.
  */
-void tui_write_lines(struct tui_window *t, char *lines, int line_width, size_t n, int offset, int start);
+void tui_write_lines(struct tui_window *t, char *lines, int line_width, int n, int offset, int start);
 
 /**
  * write file contents to window.

@@ -7,6 +7,7 @@
  */
 
 #define MAX_LINES 15000
+#define MAX_LINE_LEN 2560
 
 struct string_buf {
 	char **buf;
@@ -17,7 +18,7 @@ struct string_buf {
 struct list {
 	struct list* next;
 	struct string_buf s;
-	char buf[MAX_LINES][256]; // TODO dynamic.
+	char buf[MAX_LINES][MAX_LINE_LEN]; // TODO dynamic.
 };
 
 /**

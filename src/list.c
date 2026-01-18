@@ -15,6 +15,8 @@ struct list* list_init(void)
 	if (l == NULL)
 		return NULL;
 
+	memset(l, 0, sizeof(struct list));
+
 	l->next = NULL;
 
 	return l;
@@ -62,7 +64,7 @@ int list_popen(struct list *l, char *cmd)
 		return -1;
 	}
 
-	char line[256];
+	char line[MAX_LINE_LEN];
 	int total_lines = 0;
 	while (fgets(line, sizeof(line), fp) && total_lines < MAX_LINES) {
 		strncpy(l->buf[total_lines], line, sizeof(line));

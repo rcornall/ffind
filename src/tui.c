@@ -72,7 +72,9 @@ void tui_write_line(struct tui_window *t, char *line, int n, int start, bool hig
 {
 	if (highlight)
 		wattron(t->w, COLOR_PAIR(env.highlight_color));
+
 	mvwprintw(t->w, n, 0, "%s", line);
+
 	if (highlight)
 		wattroff(t->w, COLOR_PAIR(env.highlight_color));
 
@@ -92,13 +94,13 @@ void tui_clear_line(struct tui_window *t, int n, int start)
 	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
 }
 
-void tui_write_lines(struct tui_window *t, char *lines, int line_width, size_t n, int offset, int start)
+void tui_write_lines(struct tui_window *t, char *lines, int line_width, int n, int offset, int start)
 {
-	for (int i=offset; i< n; i++) {
-		// printf("LINE: %s\n", &lines[i * line_width]);
-		mvwprintw(t->w, i, 0, "%s", &lines[i * line_width]);
+	for (int i=0; i< n; i++) {
+		mvwprintw(t->w, i+offset, 0, "%s", &lines[i * line_width]);
 	}
-	t->curr_row = start;
+	if (start >= 0)
+		t->curr_row = start;
 	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
 }
 
