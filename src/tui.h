@@ -32,6 +32,11 @@ void tui_destroy(struct tui_window* t);
  */
 void tui_write_line(struct tui_window *t, char *line, int n, int start, bool highlight);
 
+/**
+ * write a search result line, coloring the filename:linenum: prefix distinctly.
+ */
+void tui_write_result_line(struct tui_window *t, char *line, int n, int start, bool highlight);
+
 void tui_clear_line(struct tui_window *t, int n, int start);
 
 /**

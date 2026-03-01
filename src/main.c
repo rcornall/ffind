@@ -69,9 +69,9 @@ static void move_sel(struct tui_window *t1, struct list *l, int delta)
 	int new_sel = l->sel_line + delta;
 	new_sel = new_sel < 1 ? 1 : new_sel > l->visible_lines ? l->visible_lines : new_sel;
 	if (new_sel == l->sel_line) return;
-	tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, false);
+	tui_write_result_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, false);
 	l->sel_line = new_sel;
-	tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, true);
+	tui_write_result_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, true);
 }
 
 /* simple subsequent fuzzy matching */
@@ -190,7 +190,7 @@ char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 						if (fuzzy_match_all(l->buf[i], &l->filter[sizeof("filter: ")-1])) {
 							l->buf[i][MAX_LINE_LEN] |= 0x1; // mark as matched
 							// print matched line
-							tui_write_line(t1, l->buf[i], line_no, -1, (line_no == l->sel_line ? true : false));
+							tui_write_result_line(t1, l->buf[i], line_no, -1, (line_no == l->sel_line ? true : false));
 							l->map_filtered_to_line[line_no] = i;
 							line_no++;
 						} else {
@@ -263,8 +263,8 @@ int main(int argc, char *argv[])
 					 0,0,0,0);
 
 	tui_write_line(t1, "filter: ", 0, -1, false);
-	tui_write_line(t1, l->buf[0], 1, -1, true);
-	tui_write_lines(t1, (char*)(l->buf[1]), sizeof(l->buf[0]), total_lines-1, 2, -1);
+	for (int i = 0; i < total_lines; i++)
+		tui_write_result_line(t1, l->buf[i], i + 1, -1, i == 0);
 
 	while (true) {
 		char * file = interactive_filter(t1, l, total_lines);

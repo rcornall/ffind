@@ -5,10 +5,12 @@
 #include <tui.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct local_env {
 	bool init;
 	int highlight_color;
+	int filename_color;
 };
 
 static struct local_env env;
@@ -23,9 +25,11 @@ struct tui_window* tui_init(bool autosize, int cols, int rows,
 		keypad(stdscr, TRUE); // Enable arrow keys and others
 		curs_set(0);
 		env.highlight_color = 1;
+		env.filename_color = 2;
 
 		start_color();
 		init_pair(env.highlight_color, COLOR_WHITE, COLOR_BLUE);
+		init_pair(env.filename_color, COLOR_CYAN, COLOR_BLACK);
 	}
 
 	struct tui_window* t = malloc(sizeof(struct tui_window));
@@ -79,6 +83,36 @@ void tui_write_line(struct tui_window *t, char *line, int n, int start, bool hig
 
 	if (highlight)
 		wattroff(t->w, COLOR_PAIR(env.highlight_color));
+
+	if (start >= 0)
+		t->curr_row = start;
+	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
+}
+
+void tui_write_result_line(struct tui_window *t, char *line, int n, int start, bool highlight)
+{
+	wmove(t->w, n, 0);
+	wclrtoeol(t->w);
+
+	if (highlight) {
+		wattron(t->w, COLOR_PAIR(env.highlight_color));
+		mvwprintw(t->w, n, 0, "%s", line);
+		wattroff(t->w, COLOR_PAIR(env.highlight_color));
+	} else {
+		/* color filename:linenum: prefix, then write the rest normally */
+		char *p = strchr(line, ':');
+		if (p) p = strchr(p + 1, ':');
+		if (p) p = strchr(p + 1, ':');
+		if (p) {
+			int prefix_len = (p + 1) - line;
+			wattron(t->w, COLOR_PAIR(env.filename_color));
+			mvwprintw(t->w, n, 0, "%.*s", prefix_len, line);
+			wattroff(t->w, COLOR_PAIR(env.filename_color));
+			wprintw(t->w, "%s", p + 1);
+		} else {
+			mvwprintw(t->w, n, 0, "%s", line);
+		}
+	}
 
 	if (start >= 0)
 		t->curr_row = start;
