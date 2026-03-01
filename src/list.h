@@ -23,6 +23,7 @@ struct list {
 	int map_filtered_to_line[MAX_LINES];
 	// selected line during filtering
 	int sel_line;
+	int visible_lines;
 	char filter[100];
 	int filter_len;
 };

@@ -64,6 +64,16 @@
 struct {
 } env;
 
+static void move_sel(struct tui_window *t1, struct list *l, int delta)
+{
+	int new_sel = l->sel_line + delta;
+	new_sel = new_sel < 1 ? 1 : new_sel > l->visible_lines ? l->visible_lines : new_sel;
+	if (new_sel == l->sel_line) return;
+	tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, false);
+	l->sel_line = new_sel;
+	tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, true);
+}
+
 /* simple subsequent fuzzy matching */
 bool fuzzy_match(const char *text, const char *pat) {
 	while (*text && *pat) {
@@ -72,6 +82,23 @@ bool fuzzy_match(const char *text, const char *pat) {
 		text++;
 	}
 	return *pat == '\0';
+}
+
+/* match all space-separated tokens against text (AND logic) */
+bool fuzzy_match_all(const char *text, const char *pat) {
+	char tokens[100];
+	strncpy(tokens, pat, sizeof(tokens) - 1);
+	tokens[sizeof(tokens) - 1] = '\0';
+
+	char *saveptr;
+	char *tok = strtok_r(tokens, " ", &saveptr);
+	if (!tok) return true;
+	while (tok) {
+		if (!fuzzy_match(text, tok))
+			return false;
+		tok = strtok_r(NULL, " ", &saveptr);
+	}
+	return true;
 }
 
 void debug(struct tui_window *t1, const char *fmt, ...)
@@ -89,38 +116,48 @@ void debug(struct tui_window *t1, const char *fmt, ...)
 
 char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 {
+	static char scratch[MAX_LINE_LEN];
 	char *file = NULL;
 	bool found = 0;
 	unsigned char ch;
+	if (l->visible_lines == 0)
+		l->visible_lines = total_lines;
 
 	while ((found == false) && (read(STDIN_FILENO, &ch, 1) == 1)) {
 		switch (ch) {
 		// let user scroll lines and select one:
 
-			// ctrl-j
-			case '\n': {
-				// clear previous line color first.
-				tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, false);
-				l->sel_line++;
-				tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, true);
-				// tui_scroll_down(t1, 1);
+			// escape sequences: arrows, page-up/down
+			case '\x1b': {
+				unsigned char seq[2] = {0};
+				if (read(STDIN_FILENO, &seq[0], 1) != 1) break;
+				if (seq[0] != '[' && seq[0] != 'O') break; // handle both normal and application cursor key mode
+				if (read(STDIN_FILENO, &seq[1], 1) != 1) break;
+
+				if (seq[1] == 'A')       move_sel(t1, l, -1);   // up arrow
+				else if (seq[1] == 'B')  move_sel(t1, l, +1);   // down arrow
+				else if (seq[0] == '[' && (seq[1] == '5' || seq[1] == '6')) {
+					unsigned char tmp; read(STDIN_FILENO, &tmp, 1); // consume ~
+					move_sel(t1, l, seq[1] == '5' ? -10 : +10);
+				}
 			} break;
+
+			// ctrl-j / ctrl-k
+			case '\n': move_sel(t1, l, +1); break;
 
 			// ctrl-k
 			case '': {
-				// clear previous line color first.
-				tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, false);
-				l->sel_line--;
-				tui_write_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, true);
-			} break;
+				move_sel(t1, l, -1); } break;
 
 			// enter
 			case '\r':{
-				// find the file and open it:
-				char *tmp = strchr(l->buf[l->map_filtered_to_line[l->sel_line]], ':');
+				// copy into scratch so the original buffer is not modified
+				strncpy(scratch, l->buf[l->map_filtered_to_line[l->sel_line]], MAX_LINE_LEN - 1);
+				scratch[MAX_LINE_LEN - 1] = '\0';
+				char *tmp = strchr(scratch, ':');
 				tmp = strchr(tmp+1, ':');
-				l->buf[l->map_filtered_to_line[l->sel_line]][tmp-l->buf[l->map_filtered_to_line[l->sel_line]]] = '\0';
-				file = l->buf[l->map_filtered_to_line[l->sel_line]];
+				scratch[tmp - scratch] = '\0';
+				file = scratch;
 				found=true;
 			} break;
 
@@ -150,7 +187,7 @@ char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 					int line_no = 1;
 					int i = 0;
 					while (i < total_lines) {
-						if (fuzzy_match(l->buf[i], &l->filter[sizeof("filter: ")-1])) {
+						if (fuzzy_match_all(l->buf[i], &l->filter[sizeof("filter: ")-1])) {
 							l->buf[i][MAX_LINE_LEN] |= 0x1; // mark as matched
 							// print matched line
 							tui_write_line(t1, l->buf[i], line_no, -1, (line_no == l->sel_line ? true : false));
@@ -161,6 +198,8 @@ char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 						}
 						i++;
 					}
+					l->visible_lines = line_no - 1;
+					if (l->sel_line > l->visible_lines) l->sel_line = l->visible_lines > 0 ? l->visible_lines : 1;
 					// clear remaining lines
 					for (int i = line_no; i < total_lines+1; i++) {
 						tui_clear_line(t1, i, -1);
@@ -182,7 +221,7 @@ int main(int argc, char *argv[])
 	old.c_iflag &= ~(ICRNL); // allow detecting enter vs ctrl-j
 	tcsetattr(STDIN_FILENO, TCSANOW, &old);
 
-	char *search;
+	char *search = NULL;
 	int opt;
 	// The option string "a:b" indicates that 'a' requires an argument, 'b' does not
 	while ((opt = getopt(argc, argv, "a:b")) != -1) {
@@ -200,8 +239,12 @@ int main(int argc, char *argv[])
 	}
 	// Process positional arguments starting from optind
 	for (; optind < argc; optind++) {
-		//printf("Positional argument: %s\n", argv[optind]);
 		search = argv[optind];
+	}
+
+	if (!search) {
+		fprintf(stderr, "Usage: %s <search-pattern>\n", argv[0]);
+		return 1;
 	}
 
 	struct list *l = list_init();
@@ -225,17 +268,16 @@ int main(int argc, char *argv[])
 
 	while (true) {
 		char * file = interactive_filter(t1, l, total_lines);
-		// get line number
-		char *tmp = strchr(file, ':');
-		int line_number = atoi(tmp+1);
-		file[tmp-file] = '\0';
-
 		if (file) {
+			// get line number
+			char *tmp = strchr(file, ':');
+			int line_number = atoi(tmp+1);
+			file[tmp-file] = '\0';
 #define VIM
 #ifdef VIM
 			// open file in vim
 			char vim_cmd[256];
-			snprintf(vim_cmd, sizeof(vim_cmd), "vim -c 'set noswapfile' +'%s' %s +%d", "normal! zz", file, line_number);
+			snprintf(vim_cmd, sizeof(vim_cmd), "vim -c 'set noswapfile' +%d -c 'normal! zz' %s", line_number, file);
 			endwin();
 			system(vim_cmd);
 			initscr();

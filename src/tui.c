@@ -73,6 +73,8 @@ void tui_write_line(struct tui_window *t, char *line, int n, int start, bool hig
 	if (highlight)
 		wattron(t->w, COLOR_PAIR(env.highlight_color));
 
+	wmove(t->w, n, 0);
+	wclrtoeol(t->w);
 	mvwprintw(t->w, n, 0, "%s", line);
 
 	if (highlight)
