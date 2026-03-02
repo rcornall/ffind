@@ -7,21 +7,21 @@
 struct tui_window {
 	WINDOW* w;
 	/* current row and col to display from internal window lines.
-	 * col will be zero typically. row will be staring line number. */
+	 * col will be zero typically. row will be starting line number. */
 	int curr_row;
 	int curr_col;
-	/* coords of window. */
-	int x1;
-	int y1;
-	int x2;
-	int y2;
+	/* screen coords: x=horizontal (col), y=vertical (row) */
+	int x1; /* left col */
+	int y1; /* top row */
+	int x2; /* right col */
+	int y2; /* bottom row */
 };
 
 /*
  * init tui window with autosized windows or specify cols and rows sizing.
  */
-struct tui_window* tui_init(bool autosize, int cols, int rows,
-			    int x1, int x2, int y1, int y2);
+struct tui_window* tui_init(bool autosize, int rows, int cols,
+			    int x1, int y1, int x2, int y2);
 /*
  * destroy tui instance.
  */

@@ -64,18 +64,41 @@
 struct {
 } env;
 
+static void render_view(struct tui_window *t1, struct list *l)
+{
+	int viewport_h = t1->y2 - t1->y1;
+
+	for (int row = 1; row <= viewport_h; row++) {
+		int idx = l->view_top + row - 1;
+		if (idx > l->visible_lines)
+			tui_clear_line(t1, row, -1);
+		else
+			tui_write_result_line(t1, l->buf[l->map_filtered_to_line[idx]], row, -1, idx == l->sel_line);
+	}
+}
+
 static void move_sel(struct tui_window *t1, struct list *l, int delta)
 {
 	int new_sel = l->sel_line + delta;
 	new_sel = new_sel < 1 ? 1 : new_sel > l->visible_lines ? l->visible_lines : new_sel;
 	if (new_sel == l->sel_line) return;
-	tui_write_result_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, false);
+
+	int old_sel = l->sel_line;
 	l->sel_line = new_sel;
-	tui_write_result_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line, -1, true);
+
+	int viewport_h = t1->y2 - t1->y1;
+	// If cursor moves outside of the viewport render entire view, else just redraw the new line and old line.
+	if (l->sel_line < l->view_top || l->sel_line >= l->view_top + viewport_h) {
+		l->view_top = (l->sel_line < l->view_top) ? l->sel_line : l->sel_line - viewport_h + 1;
+		render_view(t1, l);
+	} else {
+		tui_write_result_line(t1, l->buf[l->map_filtered_to_line[old_sel]], old_sel - l->view_top + 1, -1, false);
+		tui_write_result_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line - l->view_top + 1, -1, true);
+	}
 }
 
 /* simple subsequent fuzzy matching */
-bool fuzzy_match(const char *text, const char *pat) {
+static bool fuzzy_match(const char *text, const char *pat) {
 	while (*text && *pat) {
 		if (*text == *pat)
 			pat++;
@@ -85,7 +108,7 @@ bool fuzzy_match(const char *text, const char *pat) {
 }
 
 /* match all space-separated tokens against text (AND logic) */
-bool fuzzy_match_all(const char *text, const char *pat) {
+static bool fuzzy_match_all(const char *text, const char *pat) {
 	char tokens[100];
 	strncpy(tokens, pat, sizeof(tokens) - 1);
 	tokens[sizeof(tokens) - 1] = '\0';
@@ -101,7 +124,7 @@ bool fuzzy_match_all(const char *text, const char *pat) {
 	return true;
 }
 
-void debug(struct tui_window *t1, const char *fmt, ...)
+static void debug(struct tui_window *t1, const char *fmt, ...)
 {
 	/* print to last line in tui window or LINES row */
 	va_list args;
@@ -185,25 +208,19 @@ char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 
 					// filter the list
 					int line_no = 1;
-					int i = 0;
-					while (i < total_lines) {
+					for (int i = 0; i < total_lines; i++) {
 						if (fuzzy_match_all(l->buf[i], &l->filter[sizeof("filter: ")-1])) {
-							l->buf[i][MAX_LINE_LEN] |= 0x1; // mark as matched
-							// print matched line
-							tui_write_result_line(t1, l->buf[i], line_no, -1, (line_no == l->sel_line ? true : false));
+							l->buf[i][MAX_LINE_LEN] |= 0x1;
 							l->map_filtered_to_line[line_no] = i;
 							line_no++;
 						} else {
-							l->buf[i][MAX_LINE_LEN] &= ~0x1; // unmark
+							l->buf[i][MAX_LINE_LEN] &= ~0x1;
 						}
-						i++;
 					}
 					l->visible_lines = line_no - 1;
 					if (l->sel_line > l->visible_lines) l->sel_line = l->visible_lines > 0 ? l->visible_lines : 1;
-					// clear remaining lines
-					for (int i = line_no; i < total_lines+1; i++) {
-						tui_clear_line(t1, i, -1);
-					}
+					l->view_top = 1;
+					render_view(t1, l);
 				}
 				break;
 		}
@@ -259,12 +276,14 @@ int main(int argc, char *argv[])
 	/* printf("Total lines from rg: %d\n", total_lines); */
 	/* sleep(1); */
 
-	struct tui_window *t1 = tui_init(false, MAX_LINES, PREVIEW_WIDTH,
-					 0,0,0,0);
+	struct tui_window *t1 = tui_init(false, 0, 0, 0,0,0,0);
+	if (t1 == NULL) {
+		printf("Failed to init tui\n");
+		return -1;
+	}
 
 	tui_write_line(t1, "filter: ", 0, -1, false);
-	for (int i = 0; i < total_lines; i++)
-		tui_write_result_line(t1, l->buf[i], i + 1, -1, i == 0);
+	render_view(t1, l);
 
 	while (true) {
 		char * file = interactive_filter(t1, l, total_lines);
@@ -273,7 +292,7 @@ int main(int argc, char *argv[])
 			char *tmp = strchr(file, ':');
 			int line_number = atoi(tmp+1);
 			file[tmp-file] = '\0';
-#define VIM
+/* #define VIM */
 #ifdef VIM
 			// open file in vim
 			char vim_cmd[256];
@@ -292,7 +311,7 @@ int main(int argc, char *argv[])
 
 #else
 			// add new window
-			struct tui_window *t2 = tui_init(false, MAX_LINES, PREVIEW_WIDTH,
+			struct tui_window *t2 = tui_init(false, 23000, PREVIEW_WIDTH,
 							 0,0,0,0);
 
 			// 2. Load file into the Pad

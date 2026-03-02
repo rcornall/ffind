@@ -19,6 +19,7 @@ struct list* list_init(void)
 	// line 0 is filter line.
 	l->sel_line = 1;
 	l->visible_lines = 0;
+	l->view_top = 1;
 	l->filter_len = sizeof("filter: ") - 1;
 	strncpy(l->filter, "filter: ", sizeof("filter: "));
 

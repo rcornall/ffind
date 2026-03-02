@@ -6,7 +6,7 @@
  * | next -> |
  */
 
-#define MAX_LINES 10000
+#define MAX_LINES 395000
 #define MAX_LINE_LEN 200
 #define MAX_FILTERS 16
 
@@ -24,6 +24,7 @@ struct list {
 	// selected line during filtering
 	int sel_line;
 	int visible_lines;
+	int view_top;  // first result index (1-based) currently shown at pad row 1
 	char filter[100];
 	int filter_len;
 };

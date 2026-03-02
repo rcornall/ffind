@@ -15,8 +15,8 @@ struct local_env {
 
 static struct local_env env;
 
-struct tui_window* tui_init(bool autosize, int cols, int rows,
-			    int x1, int x2, int y1, int y2)
+struct tui_window* tui_init(bool autosize, int rows, int cols,
+			    int x1, int y1, int x2, int y2)
 {
 	if (env.init == false) {
 		initscr();
@@ -30,6 +30,7 @@ struct tui_window* tui_init(bool autosize, int cols, int rows,
 		start_color();
 		init_pair(env.highlight_color, COLOR_WHITE, COLOR_BLUE);
 		init_pair(env.filename_color, COLOR_CYAN, COLOR_BLACK);
+		env.init = true;
 	}
 
 	struct tui_window* t = malloc(sizeof(struct tui_window));
@@ -38,7 +39,8 @@ struct tui_window* tui_init(bool autosize, int cols, int rows,
 
 	// 1. Create a Pad instead of a Window
 	// A pad is (Height, Width). We make it tall enough for the file.
-	WINDOW *pad = newpad(cols, rows);
+	int pad_rows = (rows > 0) ? rows : LINES;
+	WINDOW *pad = newpad(pad_rows, COLS);
 	if (pad == NULL) {
 		free(t);
 		return NULL;
@@ -53,9 +55,8 @@ struct tui_window* tui_init(bool autosize, int cols, int rows,
 	t->curr_col = 0;
 	t->x1 = 2;
 	t->y1 = 2;
-	/* todo reversed */
-	t->x2 = LINES-6;
-	t->y2 = COLS-6;
+	t->x2 = COLS-6;
+	t->y2 = LINES-6;
 
 	return t;
 }
@@ -86,7 +87,7 @@ void tui_write_line(struct tui_window *t, char *line, int n, int start, bool hig
 
 	if (start >= 0)
 		t->curr_row = start;
-	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
+	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
 }
 
 void tui_write_result_line(struct tui_window *t, char *line, int n, int start, bool highlight)
@@ -116,7 +117,7 @@ void tui_write_result_line(struct tui_window *t, char *line, int n, int start, b
 
 	if (start >= 0)
 		t->curr_row = start;
-	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
+	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
 }
 
 void tui_clear_line(struct tui_window *t, int n, int start)
@@ -127,7 +128,7 @@ void tui_clear_line(struct tui_window *t, int n, int start)
 	if (start >= 0)
 		t->curr_row = start;
 
-	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
+	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
 }
 
 void tui_write_lines(struct tui_window *t, char *lines, int line_width, int n, int offset, int start)
@@ -137,7 +138,7 @@ void tui_write_lines(struct tui_window *t, char *lines, int line_width, int n, i
 	}
 	if (start >= 0)
 		t->curr_row = start;
-	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
+	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
 }
 
 int tui_write_file(struct tui_window *t, char *file)
@@ -147,7 +148,7 @@ int tui_write_file(struct tui_window *t, char *file)
 	char line[256];
 	int total_lines = 0;
 	if (fp) {
-		while (fgets(line, sizeof(line), fp) && total_lines < t->x2) {
+		while (fgets(line, sizeof(line), fp) && total_lines < getmaxy(t->w)) {
 			mvwprintw(t->w, total_lines, 0, "%s", line);
 			total_lines++;
 		}
@@ -161,7 +162,7 @@ int tui_write_file(struct tui_window *t, char *file)
 	fclose(fp);
 	fp = NULL;
 
-	prefresh(t->w, t->curr_row, t->curr_col, t->x1, t->y1, t->x2, t->y2);
+	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
 	return total_lines;
 }
 
