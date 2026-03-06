@@ -143,9 +143,6 @@ char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
 	char *file = NULL;
 	bool found = 0;
 	unsigned char ch;
-	if (l->visible_lines == 0)
-		l->visible_lines = total_lines;
-
 	while ((found == false) && (read(STDIN_FILENO, &ch, 1) == 1)) {
 		switch (ch) {
 		// let user scroll lines and select one:
@@ -273,6 +270,7 @@ int main(int argc, char *argv[])
 	char cmd[200] = {0};
 	snprintf(cmd, sizeof(cmd), "/bin/rg --no-ignore --vimgrep %s . 2>&1 | sort -r", search);
 	int total_lines = list_popen(l, cmd);
+	l->visible_lines = total_lines;
 	/* printf("Total lines from rg: %d\n", total_lines); */
 	/* sleep(1); */
 
@@ -292,7 +290,7 @@ int main(int argc, char *argv[])
 			char *tmp = strchr(file, ':');
 			int line_number = atoi(tmp+1);
 			file[tmp-file] = '\0';
-/* #define VIM */
+#define VIM
 #ifdef VIM
 			// open file in vim
 			char vim_cmd[256];
