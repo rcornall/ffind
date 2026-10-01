@@ -53,10 +53,15 @@ void tui_clear_line(struct tui_window *t, int n, int start);
 void tui_write_lines(struct tui_window *t, char *lines, int line_width, int n, int offset, int start);
 
 /**
- * write file contents to window.
- * return lines.
+ * clear the whole window.
  */
-int tui_write_file(struct tui_window *t, char *fp);
+void tui_clear(struct tui_window *t);
+
+/**
+ * write file contents from line `first` (1-based) to window rows from `offset`.
+ * `line` is highlighted. return lines written.
+ */
+int tui_write_file(struct tui_window *t, char *file, int first, int line, int offset);
 
 
 /**

@@ -13,8 +13,6 @@
 
 #include <termios.h>
 
-#define PREVIEW_HEIGHT 10
-#define PREVIEW_WIDTH 200
 //#define VIM
 
 /*
@@ -66,6 +64,14 @@
  * +
  */
 
+enum { PREVIEW_BELOW, PREVIEW_SIDE, PREVIEW_OFF };
+
+static struct {
+	struct tui_window area; // screen area split between results and preview
+	struct tui_window *preview;
+	int preview_mode;
+} env;
+
 static struct termios orig_termios;
 
 static void restore_term(void)
@@ -84,6 +90,110 @@ static void render_view(struct tui_window *t1, struct list *l)
 		else
 			tui_write_result_line(t1, l->buf[l->map_filtered_to_line[idx]], row, -1, idx == l->sel_line);
 	}
+}
+
+/* split "file:line:col:text" result. returns malloc'd file name or NULL. */
+static char* parse_result(const char *res, int *line_number)
+{
+	char *file = strdup(res);
+	char *tmp = file ? strchr(file, ':') : NULL;
+	if (tmp == NULL) {
+		free(file);
+		return NULL;
+	}
+	*tmp = '\0';
+	*line_number = atoi(tmp+1);
+	return file;
+}
+
+/* show file from line `first` in the preview with a file:line header. */
+static int preview_file(char *file, int line, int first)
+{
+	char header[256];
+	snprintf(header, sizeof(header), "%s:%d", file, line);
+	tui_write_line(env.preview, header, 0, -1, true);
+	return tui_write_file(env.preview, file, first < 1 ? 1 : first, line, 1);
+}
+
+static void update_preview(struct list *l)
+{
+	if (env.preview_mode == PREVIEW_OFF)
+		return;
+
+	int line_number;
+	char *file = NULL;
+	if (l->visible_lines > 0)
+		file = parse_result(l->buf[l->map_filtered_to_line[l->sel_line]], &line_number);
+	if (file == NULL) {
+		tui_clear(env.preview);
+		return;
+	}
+
+	int rows = env.preview->y2 - env.preview->y1;
+	preview_file(file, line_number, line_number - rows / 2);
+	free(file);
+}
+
+/* box around the screen area, with a line between results and preview. */
+static void draw_border(struct tui_window *t1)
+{
+	struct tui_window *a = &env.area;
+	int top = a->y1 - 1, left = a->x1 - 2, bottom = a->y2 + 1, right = a->x2 + 2;
+
+	mvhline(top, left, ACS_HLINE, right - left);
+	mvhline(bottom, left, ACS_HLINE, right - left);
+	mvvline(top, left, ACS_VLINE, bottom - top);
+	mvvline(top, right, ACS_VLINE, bottom - top);
+	mvaddch(top, left, ACS_ULCORNER);
+	mvaddch(top, right, ACS_URCORNER);
+	mvaddch(bottom, left, ACS_LLCORNER);
+	mvaddch(bottom, right, ACS_LRCORNER);
+
+	if (env.preview_mode == PREVIEW_BELOW) {
+		int y = t1->y2 + 1;
+		mvhline(y, left, ACS_HLINE, right - left);
+		mvaddch(y, left, ACS_LTEE);
+		mvaddch(y, right, ACS_RTEE);
+	} else if (env.preview_mode == PREVIEW_SIDE) {
+		int x = t1->x2 + 2;
+		mvvline(top, x, ACS_VLINE, bottom - top);
+		mvaddch(top, x, ACS_TTEE);
+		mvaddch(bottom, x, ACS_BTEE);
+	}
+}
+
+/* split the screen area between results and preview, then redraw everything. */
+static void layout(struct tui_window *t1, struct list *l)
+{
+	struct tui_window *t2 = env.preview;
+	struct tui_window *a = &env.area;
+
+	t1->x1 = t2->x1 = a->x1;
+	t1->y1 = t2->y1 = a->y1;
+	t1->x2 = t2->x2 = a->x2;
+	t1->y2 = t2->y2 = a->y2;
+
+	if (env.preview_mode == PREVIEW_BELOW) {
+		int mid = a->y1 + (a->y2 - a->y1) / 2;
+		t1->y2 = mid;
+		t2->y1 = mid + 2;
+	} else if (env.preview_mode == PREVIEW_SIDE) {
+		int mid = a->x1 + (a->x2 - a->x1) / 2;
+		t1->x2 = mid - 2;
+		t2->x1 = mid + 2;
+	}
+
+	// keep selection inside the resized viewport
+	int viewport_h = t1->y2 - t1->y1;
+	if (l->sel_line >= l->view_top + viewport_h)
+		l->view_top = l->sel_line - viewport_h + 1;
+
+	erase();
+	draw_border(t1);
+	refresh();
+	tui_write_line(t1, l->filter, 0, -1, false);
+	render_view(t1, l);
+	update_preview(l);
 }
 
 static void move_sel(struct tui_window *t1, struct list *l, int delta)
@@ -106,6 +216,7 @@ static void move_sel(struct tui_window *t1, struct list *l, int delta)
 		tui_write_result_line(t1, l->buf[l->map_filtered_to_line[old_sel]], old_sel - l->view_top + 1, -1, false);
 		tui_write_result_line(t1, l->buf[l->map_filtered_to_line[l->sel_line]], l->sel_line - l->view_top + 1, -1, true);
 	}
+	update_preview(l);
 }
 
 /* simple subsequent fuzzy matching */
@@ -176,8 +287,10 @@ static void apply_filter(struct tui_window *t1, struct list *l)
 	l->sel_line = 1;
 	l->view_top = 1;
 	render_view(t1, l);
+	update_preview(l);
 }
 
+#ifdef VIM
 static void run_cmd(char *const argv[])
 {
 	pid_t pid = fork();
@@ -188,6 +301,7 @@ static void run_cmd(char *const argv[])
 	if (pid > 0)
 		waitpid(pid, NULL, 0);
 }
+#endif
 
 /*
  * returns the selected result line, or NULL when the user quits.
@@ -217,6 +331,12 @@ char* interactive_filter(struct tui_window *t1, struct list *l)
 			// ctrl-c
 			case '\x03':
 				return NULL;
+
+			// ctrl-p: cycle preview below / side / off
+			case '\x10':
+				env.preview_mode = (env.preview_mode + 1) % 3;
+				layout(t1, l);
+				break;
 
 			// ctrl-j / ctrl-k
 			case '\n': move_sel(t1, l, +1); break;
@@ -286,25 +406,21 @@ int main(int argc, char *argv[])
 	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
 	struct tui_window *t1 = tui_init(false, 0, 0, 0,0,0,0);
-	if (t1 == NULL) {
+	env.preview = tui_init(false, 0, 0, 0,0,0,0);
+	if (t1 == NULL || env.preview == NULL) {
+		endwin();
 		printf("Failed to init tui\n");
 		return -1;
 	}
-
-	tui_write_line(t1, l->filter, 0, -1, false);
-	render_view(t1, l);
+	env.area = *t1;
+	layout(t1, l);
 
 	char *sel;
 	while ((sel = interactive_filter(t1, l))) {
-		// split "file:line:col:text"
-		char *file = strdup(sel);
-		char *tmp = file ? strchr(file, ':') : NULL;
-		if (tmp == NULL) {
-			free(file);
+		int line_number;
+		char *file = parse_result(sel, &line_number);
+		if (file == NULL)
 			continue;
-		}
-		*tmp = '\0';
-		int line_number = atoi(tmp+1);
 #ifdef VIM
 		// open file in vim
 		char line_arg[32];
@@ -316,62 +432,46 @@ int main(int argc, char *argv[])
 		reset_prog_mode();
 		refresh();
 		tui_refresh(t1);
+		if (env.preview_mode != PREVIEW_OFF)
+			tui_refresh(env.preview);
 #else
-		// add new window
-		struct tui_window *t2 = tui_init(false, 23000, PREVIEW_WIDTH,
-						 0,0,0,0);
-		if (t2 == NULL) {
-			free(file);
-			continue;
+		// scroll the preview, q to go back.
+		if (env.preview_mode == PREVIEW_OFF) {
+			env.preview_mode = PREVIEW_BELOW;
+			layout(t1, l);
 		}
-
-		// 2. Load file into the Pad
-		int file_lines = tui_write_file(t2, file);
-		int current_line = line_number > 1 ? line_number - 1 : 0;
+		int rows = env.preview->y2 - env.preview->y1;
+		int first = line_number - rows / 2;
+		if (first < 1) first = 1;
+		int shown = preview_file(file, line_number, first);
 		unsigned char ch = 0;
-		prefresh(t2->w, current_line, 0, t2->y1, t2->x1, t2->y2, t2->x2);
 
-		// 3. Event Loop for Scrolling
-		while ((read(STDIN_FILENO, &ch, 1) == 1) && ch != 'q') {
+		while ((read(STDIN_FILENO, &ch, 1) == 1) && ch != 'q' && ch != '\x03') {
 			switch (ch) {
 				case 'j': // Vim down
-					if (current_line < file_lines-2) current_line++;
+					if (shown == rows) first++;
 					break;
 				case 'k': // Vim up
-					if (current_line > 0) current_line--;
+					if (first > 1) first--;
 					break;
 				case 'd': // Vim down more
-				{
-					const int down_lines = 20;
-					if ((current_line + down_lines) < file_lines - 2)
-							current_line += down_lines;
-					else
-						current_line = file_lines - 2;
-				} break;
-				  //
+					if (shown == rows) first += 20;
+					break;
 				case 'u': // Vim up more
-				{
-					const int up_lines = 20;
-					if ((current_line - up_lines) > 0)
-						current_line -= up_lines;
-					else
-						current_line = 0;
-				} break;
+					first = first > 20 ? first - 20 : 1;
+					break;
 				default:
 					break;
 			}
-
-			// 4. Refresh the Pad
-			// prefresh(pad, pad_row, pad_col, screen_y1, screen_x1, screen_y2, screen_x2)
-			prefresh(t2->w, current_line, 0, t2->y1, t2->x1, t2->y2, t2->x2);
+			shown = preview_file(file, line_number, first);
 		}
 		// back to interactive filter
-		tui_destroy(t2);
-		tui_refresh(t1);
+		update_preview(l);
 #endif
 		free(file);
 	}
 
+	tui_destroy(env.preview);
 	tui_destroy(t1);
 	endwin();
 	list_destroy(l);

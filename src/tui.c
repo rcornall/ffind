@@ -155,27 +155,55 @@ void tui_write_lines(struct tui_window *t, char *lines, int line_width, int n, i
 	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
 }
 
-int tui_write_file(struct tui_window *t, char *file)
+void tui_clear(struct tui_window *t)
 {
-	FILE* fp = fopen(file, "r");
+	werase(t->w);
+	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
+}
 
-	char line[256];
-	int total_lines = 0;
-	if (fp) {
-		while (fgets(line, sizeof(line), fp) && total_lines < getmaxy(t->w)) {
-			mvwprintw(t->w, total_lines, 0, "%s", line);
-			total_lines++;
-		}
-	} else {
-		wprintw(t->w, "File not found.");
+int tui_write_file(struct tui_window *t, char *file, int first, int line, int offset)
+{
+	int rows = t->y2 - t->y1 + 1 - offset;
+	int max_x = t->x2 - t->x1 + 1;
+
+	for (int row = offset; row < offset + rows; row++) {
+		wmove(t->w, row, 0);
+		wclrtoeol(t->w);
+	}
+
+	FILE* fp = fopen(file, "r");
+	if (fp == NULL) {
+		mvwprintw(t->w, offset, 0, "File not found.");
+		prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
 		return 0;
 	}
 
+	char *buf = NULL;
+	size_t sz = 0;
+	ssize_t len;
+	int n = 0;
+	int row = offset;
+	while (row < offset + rows && (len = getline(&buf, &sz, fp)) != -1) {
+		n++;
+		if (n < first)
+			continue;
+
+		while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r'))
+			buf[--len] = '\0';
+
+		wmove(t->w, row, 0);
+		if (n == line)
+			wattron(t->w, COLOR_PAIR(env.highlight_color));
+		put_clipped(t->w, buf, -1, max_x);
+		if (n == line)
+			wattroff(t->w, COLOR_PAIR(env.highlight_color));
+		row++;
+	}
+	free(buf);
 	fclose(fp);
-	fp = NULL;
 
 	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
-	return total_lines;
+	return row - offset;
 }
 
 void tui_scroll_up(struct tui_window *t, int count)
