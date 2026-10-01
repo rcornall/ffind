@@ -13,7 +13,6 @@
 
 #include <termios.h>
 
-//#define VIM
 
 /*
  * I want to store first rg contents.
@@ -397,7 +396,6 @@ static void apply_filter(struct tui_window *t1, struct list *l, bool narrow)
 	update_preview(l);
 }
 
-#ifdef VIM
 static void run_cmd(char *const argv[])
 {
 	pid_t pid = fork();
@@ -408,12 +406,27 @@ static void run_cmd(char *const argv[])
 	if (pid > 0)
 		waitpid(pid, NULL, 0);
 }
-#endif
+
+static void open_vim(struct tui_window *t1, char *file, int line_number)
+{
+	char line_arg[32];
+	snprintf(line_arg, sizeof(line_arg), "+%d", line_number);
+	char *vim_argv[] = { "vim", "-c", "set noswapfile", line_arg, "-c", "normal! zz", "--", file, NULL };
+	def_prog_mode();
+	endwin();
+	run_cmd(vim_argv);
+	reset_prog_mode();
+	refresh();
+	tui_refresh(t1);
+	if (env.preview_mode != PREVIEW_OFF)
+		tui_refresh(env.preview);
+}
 
 /*
  * returns the selected result line, or NULL when the user quits.
+ * `vim` is set when it should be opened in vim instead of previewed.
  */
-char* interactive_filter(struct tui_window *t1, struct list *l)
+char* interactive_filter(struct tui_window *t1, struct list *l, bool *vim)
 {
 	unsigned char ch;
 	while (read(STDIN_FILENO, &ch, 1) == 1) {
@@ -452,10 +465,13 @@ char* interactive_filter(struct tui_window *t1, struct list *l)
 			case '\x0b': {
 				move_sel(t1, l, -1); } break;
 
-			// enter
+			// enter: scroll preview, ctrl-o: open in vim
 			case '\r':
-				if (l->visible_lines > 0)
+			case '\x0f':
+				if (l->visible_lines > 0) {
+					*vim = ch == '\x0f';
 					return l->buf[l->map_filtered_to_line[l->sel_line]];
+				}
 				break;
 
 			// backspace
@@ -527,25 +543,18 @@ int main(int argc, char *argv[])
 	layout(t1, l);
 
 	char *sel;
-	while ((sel = interactive_filter(t1, l))) {
+	bool vim;
+	while ((sel = interactive_filter(t1, l, &vim))) {
 		int line_number;
 		char *file = parse_result(sel, &line_number);
 		if (file == NULL)
 			continue;
-#ifdef VIM
-		// open file in vim
-		char line_arg[32];
-		snprintf(line_arg, sizeof(line_arg), "+%d", line_number);
-		char *vim_argv[] = { "vim", "-c", "set noswapfile", line_arg, "-c", "normal! zz", "--", file, NULL };
-		def_prog_mode();
-		endwin();
-		run_cmd(vim_argv);
-		reset_prog_mode();
-		refresh();
-		tui_refresh(t1);
-		if (env.preview_mode != PREVIEW_OFF)
-			tui_refresh(env.preview);
-#else
+		if (vim) {
+			open_vim(t1, file, line_number);
+			free(file);
+			continue;
+		}
+
 		// scroll the preview, q to go back.
 		if (env.preview_mode == PREVIEW_OFF) {
 			env.preview_mode = PREVIEW_BELOW;
@@ -571,6 +580,9 @@ int main(int argc, char *argv[])
 				case 'u': // Vim up more
 					first = first > 20 ? first - 20 : 1;
 					break;
+				case '\x0f': // ctrl-o
+					open_vim(t1, file, line_number);
+					break;
 				default:
 					break;
 			}
@@ -578,7 +590,6 @@ int main(int argc, char *argv[])
 		}
 		// back to interactive filter
 		update_preview(l);
-#endif
 		free(file);
 	}
 
