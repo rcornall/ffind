@@ -18,6 +18,7 @@ struct list {
 	int total_lines;
 	int cap;
 	int *map_filtered_to_line;
+	int *score; // filter score per line, higher is better
 	// selected line during filtering
 	int sel_line;
 	int visible_lines;

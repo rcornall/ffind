@@ -50,6 +50,7 @@ static void list_free(struct list* l)
 		free(l->buf[i]);
 	free(l->buf);
 	free(l->map_filtered_to_line);
+	free(l->score);
 	free(l);
 }
 
@@ -132,7 +133,8 @@ int list_run(struct list *l, char *const argv[])
 
 	// index 0 is the filter line, results are 1-based.
 	l->map_filtered_to_line = malloc((l->total_lines + 1) * sizeof(int));
-	if (l->map_filtered_to_line == NULL)
+	l->score = calloc(l->total_lines + 1, sizeof(int));
+	if (l->map_filtered_to_line == NULL || l->score == NULL)
 		return -1;
 	for (int i = 0; i < l->total_lines; i++)
 		l->map_filtered_to_line[i+1] = i;
