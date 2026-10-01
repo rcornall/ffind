@@ -1,3 +1,6 @@
+#ifndef TUI_H
+#define TUI_H
+
 /**
  * Terminal UI support api.
  */
@@ -28,6 +31,11 @@ struct tui_window* tui_init(bool autosize, int rows, int cols,
 void tui_destroy(struct tui_window* t);
 
 /**
+ * redraw the whole window, e.g. after returning from another program.
+ */
+void tui_refresh(struct tui_window *t);
+
+/**
  * write line to the window at `n` and refresh from `start` row.
  */
 void tui_write_line(struct tui_window *t, char *line, int n, int start, bool highlight);
@@ -51,7 +59,7 @@ void tui_write_lines(struct tui_window *t, char *lines, int line_width, int n, i
 int tui_write_file(struct tui_window *t, char *fp);
 
 
-/** 
+/**
  * scroll up or down `count` lines in a window `w`.
  */
 void tui_scroll_up(struct tui_window *t, int count);
@@ -61,3 +69,5 @@ void tui_scroll_down(struct tui_window *t, int count);
  * highlight a line
  */
 void tui_highlight_line(struct tui_window *t, int line);
+
+#endif

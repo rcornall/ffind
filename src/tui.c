@@ -20,9 +20,8 @@ struct tui_window* tui_init(bool autosize, int rows, int cols,
 {
 	if (env.init == false) {
 		initscr();
-		cbreak();
+		raw(); // ctrl-c is handled as a key so the terminal gets restored
 		noecho();
-		keypad(stdscr, TRUE); // Enable arrow keys and others
 		curs_set(0);
 		env.highlight_color = 1;
 		env.filename_color = 2;
@@ -73,6 +72,19 @@ void tui_destroy(struct tui_window* t)
 	// refresh?
 }
 
+void tui_refresh(struct tui_window *t)
+{
+	touchwin(t->w);
+	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
+}
+
+/* write at most `len` chars (all if < 0), stopping at `max_x` so lines never wrap. */
+static void put_clipped(WINDOW *w, const char *s, int len, int max_x)
+{
+	for (int i = 0; s[i] && (len < 0 || i < len) && getcurx(w) < max_x; i++)
+		waddch(w, (unsigned char)s[i]);
+}
+
 void tui_write_line(struct tui_window *t, char *line, int n, int start, bool highlight)
 {
 	if (highlight)
@@ -80,7 +92,7 @@ void tui_write_line(struct tui_window *t, char *line, int n, int start, bool hig
 
 	wmove(t->w, n, 0);
 	wclrtoeol(t->w);
-	mvwprintw(t->w, n, 0, "%s", line);
+	put_clipped(t->w, line, -1, t->x2 - t->x1 + 1);
 
 	if (highlight)
 		wattroff(t->w, COLOR_PAIR(env.highlight_color));
@@ -92,12 +104,14 @@ void tui_write_line(struct tui_window *t, char *line, int n, int start, bool hig
 
 void tui_write_result_line(struct tui_window *t, char *line, int n, int start, bool highlight)
 {
+	int max_x = t->x2 - t->x1 + 1;
+
 	wmove(t->w, n, 0);
 	wclrtoeol(t->w);
 
 	if (highlight) {
 		wattron(t->w, COLOR_PAIR(env.highlight_color));
-		mvwprintw(t->w, n, 0, "%s", line);
+		put_clipped(t->w, line, -1, max_x);
 		wattroff(t->w, COLOR_PAIR(env.highlight_color));
 	} else {
 		/* color filename:linenum: prefix, then write the rest normally */
@@ -107,11 +121,11 @@ void tui_write_result_line(struct tui_window *t, char *line, int n, int start, b
 		if (p) {
 			int prefix_len = (p + 1) - line;
 			wattron(t->w, COLOR_PAIR(env.filename_color));
-			mvwprintw(t->w, n, 0, "%.*s", prefix_len, line);
+			put_clipped(t->w, line, prefix_len, max_x);
 			wattroff(t->w, COLOR_PAIR(env.filename_color));
-			wprintw(t->w, "%s", p + 1);
+			put_clipped(t->w, p + 1, -1, max_x);
 		} else {
-			mvwprintw(t->w, n, 0, "%s", line);
+			put_clipped(t->w, line, -1, max_x);
 		}
 	}
 
@@ -154,8 +168,6 @@ int tui_write_file(struct tui_window *t, char *file)
 		}
 	} else {
 		wprintw(t->w, "File not found.");
-		fclose(fp);
-		fp = NULL;
 		return 0;
 	}
 

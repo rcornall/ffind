@@ -2,7 +2,11 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <ctype.h>
 #include <unistd.h>
+#include <poll.h>
+#include <sys/wait.h>
 
 #include <tui.h>
 #include <list.h>
@@ -11,6 +15,7 @@
 
 #define PREVIEW_HEIGHT 10
 #define PREVIEW_WIDTH 200
+//#define VIM
 
 /*
  * I want to store first rg contents.
@@ -61,8 +66,12 @@
  * +
  */
 
-struct {
-} env;
+static struct termios orig_termios;
+
+static void restore_term(void)
+{
+	tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
+}
 
 static void render_view(struct tui_window *t1, struct list *l)
 {
@@ -79,6 +88,8 @@ static void render_view(struct tui_window *t1, struct list *l)
 
 static void move_sel(struct tui_window *t1, struct list *l, int delta)
 {
+	if (l->visible_lines == 0) return;
+
 	int new_sel = l->sel_line + delta;
 	new_sel = new_sel < 1 ? 1 : new_sel > l->visible_lines ? l->visible_lines : new_sel;
 	if (new_sel == l->sel_line) return;
@@ -98,168 +109,161 @@ static void move_sel(struct tui_window *t1, struct list *l, int delta)
 }
 
 /* simple subsequent fuzzy matching */
-static bool fuzzy_match(const char *text, const char *pat) {
+static bool fuzzy_match(const char *text, const char *pat, bool icase) {
 	while (*text && *pat) {
-		if (*text == *pat)
+		char c = icase ? tolower((unsigned char)*text) : *text;
+		if (c == *pat)
 			pat++;
 		text++;
 	}
 	return *pat == '\0';
 }
 
-/* match all space-separated tokens against text (AND logic) */
+/* match all space-separated tokens against text (AND logic). smartcase. */
 static bool fuzzy_match_all(const char *text, const char *pat) {
 	char tokens[100];
 	strncpy(tokens, pat, sizeof(tokens) - 1);
 	tokens[sizeof(tokens) - 1] = '\0';
 
+	bool icase = true;
+	for (const char *p = pat; *p; p++)
+		if (isupper((unsigned char)*p))
+			icase = false;
+
 	char *saveptr;
 	char *tok = strtok_r(tokens, " ", &saveptr);
 	if (!tok) return true;
 	while (tok) {
-		if (!fuzzy_match(text, tok))
+		if (!fuzzy_match(text, tok, icase))
 			return false;
 		tok = strtok_r(NULL, " ", &saveptr);
 	}
 	return true;
 }
 
-static void debug(struct tui_window *t1, const char *fmt, ...)
+static void __attribute__((unused)) debug(struct tui_window *t1, const char *fmt, ...)
 {
-	/* print to last line in tui window or LINES row */
+	/* print to last visible row of the tui window */
 	va_list args;
 	va_start(args, fmt);
-	/* tui_write_line(t1, "                                                                                ", */
-			   /* LINES - 4, -1, false); */
 	char buf[256];
 	vsnprintf(buf, sizeof(buf), fmt, args);
-	tui_write_line(t1, buf, LINES - 4, -1, false);
+	tui_write_line(t1, buf, t1->y2 - t1->y1, -1, false);
 	va_end(args);
 }
 
-char* interactive_filter(struct tui_window *t1, struct list *l, int total_lines)
+/* read one byte, giving up after `ms`. */
+static bool read_timeout(unsigned char *ch, int ms)
 {
-	static char scratch[MAX_LINE_LEN];
-	char *file = NULL;
-	bool found = 0;
+	struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
+	if (poll(&pfd, 1, ms) <= 0)
+		return false;
+	return read(STDIN_FILENO, ch, 1) == 1;
+}
+
+static void apply_filter(struct tui_window *t1, struct list *l)
+{
+	tui_write_line(t1, l->filter, 0, -1, false);
+
+	int line_no = 1;
+	for (int i = 0; i < l->total_lines; i++) {
+		if (fuzzy_match_all(l->buf[i], &l->filter[FILTER_PREFIX_LEN])) {
+			l->map_filtered_to_line[line_no] = i;
+			line_no++;
+		}
+	}
+	l->visible_lines = line_no - 1;
+	l->sel_line = 1;
+	l->view_top = 1;
+	render_view(t1, l);
+}
+
+static void run_cmd(char *const argv[])
+{
+	pid_t pid = fork();
+	if (pid == 0) {
+		execvp(argv[0], argv);
+		_exit(127);
+	}
+	if (pid > 0)
+		waitpid(pid, NULL, 0);
+}
+
+/*
+ * returns the selected result line, or NULL when the user quits.
+ */
+char* interactive_filter(struct tui_window *t1, struct list *l)
+{
 	unsigned char ch;
-	while ((found == false) && (read(STDIN_FILENO, &ch, 1) == 1)) {
+	while (read(STDIN_FILENO, &ch, 1) == 1) {
 		switch (ch) {
 		// let user scroll lines and select one:
 
-			// escape sequences: arrows, page-up/down
+			// escape sequences: arrows, page-up/down. lone escape quits.
 			case '\x1b': {
 				unsigned char seq[2] = {0};
-				if (read(STDIN_FILENO, &seq[0], 1) != 1) break;
+				if (!read_timeout(&seq[0], 50)) return NULL;
 				if (seq[0] != '[' && seq[0] != 'O') break; // handle both normal and application cursor key mode
-				if (read(STDIN_FILENO, &seq[1], 1) != 1) break;
+				if (!read_timeout(&seq[1], 50)) break;
 
 				if (seq[1] == 'A')       move_sel(t1, l, -1);   // up arrow
 				else if (seq[1] == 'B')  move_sel(t1, l, +1);   // down arrow
 				else if (seq[0] == '[' && (seq[1] == '5' || seq[1] == '6')) {
-					unsigned char tmp; read(STDIN_FILENO, &tmp, 1); // consume ~
+					unsigned char tmp; read_timeout(&tmp, 50); // consume ~
 					move_sel(t1, l, seq[1] == '5' ? -10 : +10);
 				}
 			} break;
+
+			// ctrl-c
+			case '\x03':
+				return NULL;
 
 			// ctrl-j / ctrl-k
 			case '\n': move_sel(t1, l, +1); break;
 
 			// ctrl-k
-			case '': {
+			case '\x0b': {
 				move_sel(t1, l, -1); } break;
 
 			// enter
-			case '\r':{
-				// copy into scratch so the original buffer is not modified
-				strncpy(scratch, l->buf[l->map_filtered_to_line[l->sel_line]], MAX_LINE_LEN - 1);
-				scratch[MAX_LINE_LEN - 1] = '\0';
-				char *tmp = strchr(scratch, ':');
-				tmp = strchr(tmp+1, ':');
-				scratch[tmp - scratch] = '\0';
-				file = scratch;
-				found=true;
-			} break;
+			case '\r':
+				if (l->visible_lines > 0)
+					return l->buf[l->map_filtered_to_line[l->sel_line]];
+				break;
+
+			// backspace
+			case 127:
+			case '\b':
+				if (l->filter_len > FILTER_PREFIX_LEN) {
+					l->filter_len--;
+					l->filter[l->filter_len] = '\0';
+					apply_filter(t1, l);
+				}
+				break;
 
 			// let user enter fuzzy filter om lines
 			// let user enter to takes current filtered results as the new search list. so to make further searches on this list.
 			default:
-				if (ch >= 32 && ch <= 127) {
-					if (ch == 127 || ch == 8) { // backspace
-						if (l->filter_len > (sizeof("filter: ")-1)) {
-							l->filter_len--;
-							l->filter[l->filter_len] = '\0';
-						}
-					} else {
-						// append to filter string
-						size_t len = strnlen(l->filter, sizeof(l->filter));
-						if (len < sizeof(l->filter) - 1) {
-							l->filter[l->filter_len] = ch;
-							l->filter[l->filter_len + 1] = '\0';
-							l->filter_len++;
-						}
-					}
-					// print filter string
-					tui_clear_line(t1, 0, -1);
-					tui_write_line(t1, l->filter, 0, -1, false);
-
-					// filter the list
-					int line_no = 1;
-					for (int i = 0; i < total_lines; i++) {
-						if (fuzzy_match_all(l->buf[i], &l->filter[sizeof("filter: ")-1])) {
-							l->buf[i][MAX_LINE_LEN] |= 0x1;
-							l->map_filtered_to_line[line_no] = i;
-							line_no++;
-						} else {
-							l->buf[i][MAX_LINE_LEN] &= ~0x1;
-						}
-					}
-					l->visible_lines = line_no - 1;
-					if (l->sel_line > l->visible_lines) l->sel_line = l->visible_lines > 0 ? l->visible_lines : 1;
-					l->view_top = 1;
-					render_view(t1, l);
+				if (ch >= 32 && ch < 127 && l->filter_len < (int)sizeof(l->filter) - 1) {
+					l->filter[l->filter_len] = ch;
+					l->filter[l->filter_len + 1] = '\0';
+					l->filter_len++;
+					apply_filter(t1, l);
 				}
 				break;
 		}
 	}
 
-	return file;
+	return NULL;
 }
 
 int main(int argc, char *argv[])
 {
-	// setup terminal raw
-	struct termios old;
-	tcgetattr(STDIN_FILENO, &old);
-	old.c_lflag &= ~(ICANON | ECHO);
-	old.c_iflag &= ~(ICRNL); // allow detecting enter vs ctrl-j
-	tcsetattr(STDIN_FILENO, TCSANOW, &old);
-
-	char *search = NULL;
-	int opt;
-	// The option string "a:b" indicates that 'a' requires an argument, 'b' does not
-	while ((opt = getopt(argc, argv, "a:b")) != -1) {
-		switch (opt) {
-			case 'a':
-				printf("Option -a provided with value: %s\n", optarg);
-				break;
-			case 'b':
-				printf("Option -b provided\n");
-				break;
-			default:
-				fprintf(stderr, "Usage: %s [-a value] [-b]\n", argv[0]);
-				return 1;
-		}
-	}
-	// Process positional arguments starting from optind
-	for (; optind < argc; optind++) {
-		search = argv[optind];
-	}
-
-	if (!search) {
+	if (argc != 2) {
 		fprintf(stderr, "Usage: %s <search-pattern>\n", argv[0]);
 		return 1;
 	}
+	char *search = argv[1];
 
 	struct list *l = list_init();
 	if (!l) {
@@ -267,12 +271,19 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	char cmd[200] = {0};
-	snprintf(cmd, sizeof(cmd), "/bin/rg --no-ignore --vimgrep %s . 2>&1 | sort -r", search);
-	int total_lines = list_popen(l, cmd);
-	l->visible_lines = total_lines;
-	/* printf("Total lines from rg: %d\n", total_lines); */
-	/* sleep(1); */
+	char *rg_argv[] = { "rg", "--no-ignore", "--vimgrep", "--sortr", "path", "--", search, ".", NULL };
+	if (list_run(l, rg_argv) < 0) {
+		list_destroy(l);
+		return -1;
+	}
+
+	// setup terminal raw, restored on exit.
+	tcgetattr(STDIN_FILENO, &orig_termios);
+	atexit(restore_term);
+	struct termios raw = orig_termios;
+	raw.c_lflag &= ~(ICANON | ECHO | ISIG);
+	raw.c_iflag &= ~(ICRNL); // allow detecting enter vs ctrl-j
+	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
 	struct tui_window *t1 = tui_init(false, 0, 0, 0,0,0,0);
 	if (t1 == NULL) {
@@ -280,91 +291,89 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	tui_write_line(t1, "filter: ", 0, -1, false);
+	tui_write_line(t1, l->filter, 0, -1, false);
 	render_view(t1, l);
 
-	while (true) {
-		char * file = interactive_filter(t1, l, total_lines);
-		if (file) {
-			// get line number
-			char *tmp = strchr(file, ':');
-			int line_number = atoi(tmp+1);
-			file[tmp-file] = '\0';
-#define VIM
+	char *sel;
+	while ((sel = interactive_filter(t1, l))) {
+		// split "file:line:col:text"
+		char *file = strdup(sel);
+		char *tmp = file ? strchr(file, ':') : NULL;
+		if (tmp == NULL) {
+			free(file);
+			continue;
+		}
+		*tmp = '\0';
+		int line_number = atoi(tmp+1);
 #ifdef VIM
-			// open file in vim
-			char vim_cmd[256];
-			snprintf(vim_cmd, sizeof(vim_cmd), "vim -c 'set noswapfile' +%d -c 'normal! zz' %s", line_number, file);
-			endwin();
-			system(vim_cmd);
-			initscr();
-			cbreak();
-			noecho();
-			keypad(stdscr, TRUE); // Enable arrow keys and others
-			curs_set(0);
-
-			start_color();
-			prefresh(t1->w, 0, 0, 2, 2, LINES - 3, COLS-3);
-
-
+		// open file in vim
+		char line_arg[32];
+		snprintf(line_arg, sizeof(line_arg), "+%d", line_number);
+		char *vim_argv[] = { "vim", "-c", "set noswapfile", line_arg, "-c", "normal! zz", "--", file, NULL };
+		def_prog_mode();
+		endwin();
+		run_cmd(vim_argv);
+		reset_prog_mode();
+		refresh();
+		tui_refresh(t1);
 #else
-			// add new window
-			struct tui_window *t2 = tui_init(false, 23000, PREVIEW_WIDTH,
-							 0,0,0,0);
-
-			// 2. Load file into the Pad
-			total_lines  = tui_write_file(t2, file);
-			int current_line = 0;
-			unsigned char ch = 0;
-
-			// 3. Event Loop for Scrolling
-			while ((read(STDIN_FILENO, &ch, 1) == 1) && ch != 'q') {
-				switch (ch) {
-					case 'j': // Vim down
-					/* case KEY_DOWN: */
-						if (current_line < total_lines-2) current_line++;
-						break;
-					case 'k': // Vim up
-					/* case KEY_UP: */
-						if (current_line > 0) current_line--;
-						break;
-					case 'd': // Vim down more
-					{
-						const int down_lines = 20;
-						if ((current_line + down_lines) < total_lines - 2)
-								current_line += down_lines;
-						else
-							current_line = total_lines - 2;
-					} break;
-					  //
-					case 'u': // Vim up more
-					{
-						const int up_lines = 20;
-						if ((current_line - up_lines) > 0)
-							current_line -= up_lines;
-						else
-							current_line = 0;
-					} break;
-					default:
-						break;
-				}
-
-				// 4. Refresh the Pad
-				// prefresh(pad, pad_row, pad_col, screen_y1, screen_x1, screen_y2, screen_x2)
-				prefresh(t2->w, current_line, 0, 2, 2, LINES - 3, COLS-3);
-			}
-			// back to interactive filter
-			delwin(t2->w);
-			prefresh(t1->w, 0, 0, 2, 2, LINES - 3, COLS-3);
-#endif
-		} else {
-			printf("No file selected, exiting.\n");
+		// add new window
+		struct tui_window *t2 = tui_init(false, 23000, PREVIEW_WIDTH,
+						 0,0,0,0);
+		if (t2 == NULL) {
+			free(file);
+			continue;
 		}
 
+		// 2. Load file into the Pad
+		int file_lines = tui_write_file(t2, file);
+		int current_line = line_number > 1 ? line_number - 1 : 0;
+		unsigned char ch = 0;
+		prefresh(t2->w, current_line, 0, t2->y1, t2->x1, t2->y2, t2->x2);
+
+		// 3. Event Loop for Scrolling
+		while ((read(STDIN_FILENO, &ch, 1) == 1) && ch != 'q') {
+			switch (ch) {
+				case 'j': // Vim down
+					if (current_line < file_lines-2) current_line++;
+					break;
+				case 'k': // Vim up
+					if (current_line > 0) current_line--;
+					break;
+				case 'd': // Vim down more
+				{
+					const int down_lines = 20;
+					if ((current_line + down_lines) < file_lines - 2)
+							current_line += down_lines;
+					else
+						current_line = file_lines - 2;
+				} break;
+				  //
+				case 'u': // Vim up more
+				{
+					const int up_lines = 20;
+					if ((current_line - up_lines) > 0)
+						current_line -= up_lines;
+					else
+						current_line = 0;
+				} break;
+				default:
+					break;
+			}
+
+			// 4. Refresh the Pad
+			// prefresh(pad, pad_row, pad_col, screen_y1, screen_x1, screen_y2, screen_x2)
+			prefresh(t2->w, current_line, 0, t2->y1, t2->x1, t2->y2, t2->x2);
+		}
+		// back to interactive filter
+		tui_destroy(t2);
+		tui_refresh(t1);
+#endif
+		free(file);
 	}
 
-	/* while(true) {} */
+	tui_destroy(t1);
 	endwin();
+	list_destroy(l);
 	return 0;
 }
-

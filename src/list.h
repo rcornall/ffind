@@ -1,3 +1,6 @@
+#ifndef LIST_H
+#define LIST_H
+
 /**
  * list management
  *
@@ -6,21 +9,15 @@
  * | next -> |
  */
 
-#define MAX_LINES 395000
-#define MAX_LINE_LEN 200
-#define MAX_FILTERS 16
-
-struct string_buf {
-	char **buf;
-	int n;
-	int m;
-};
+#define FILTER_PREFIX "filter: "
+#define FILTER_PREFIX_LEN ((int)sizeof(FILTER_PREFIX) - 1)
 
 struct list {
 	struct list* next;
-	struct string_buf s;
-	char buf[MAX_LINES][MAX_LINE_LEN + MAX_FILTERS]; // TODO dynamic.
-	int map_filtered_to_line[MAX_LINES];
+	char **buf;
+	int total_lines;
+	int cap;
+	int *map_filtered_to_line;
 	// selected line during filtering
 	int sel_line;
 	int visible_lines;
@@ -45,19 +42,19 @@ struct list* list_push(struct list* l);
 void list_drop(struct list* l);
 
 /**
- * Run cmd and fill list buf with stdoutput.
+ * Run argv (without a shell) and fill list buf with stdoutput.
  */
-int list_popen(struct list *l, char *cmd);
+int list_run(struct list *l, char *const argv[]);
 
 /**
- * destroy list.
+ * destroy list and all lists pushed onto it.
  */
 void list_destroy(struct list* l);
 
 /*
  *
  * l = list_init
- * 
+ *
  * // create new list
  * l2 = l.push()
  *
@@ -68,3 +65,5 @@ void list_destroy(struct list* l);
  *
  *
  */
+
+#endif
