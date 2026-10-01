@@ -21,14 +21,42 @@ struct tui_window {
 };
 
 /*
- * init tui window with autosized windows or specify cols and rows sizing.
+ * init tui window covering the default screen area.
  */
-struct tui_window* tui_init(bool autosize, int rows, int cols,
-			    int x1, int y1, int x2, int y2);
+struct tui_window* tui_init(void);
+
 /*
  * destroy tui instance.
  */
 void tui_destroy(struct tui_window* t);
+
+/*
+ * end the tui, restoring the terminal.
+ */
+void tui_end(void);
+
+/*
+ * leave the tui temporarily to run another program, and come back.
+ * windows need a tui_refresh after resuming.
+ */
+void tui_suspend(void);
+void tui_resume(void);
+
+/**
+ * set the screen area the window is shown in.
+ */
+void tui_set_area(struct tui_window *t, int x1, int y1, int x2, int y2);
+
+/**
+ * number of visible rows.
+ */
+int tui_rows(struct tui_window *t);
+
+/**
+ * clear the screen and draw a box around the area x1,y1 - x2,y2, with an
+ * optional divider at `split_row` or `split_col` (-1 for none).
+ */
+void tui_draw_border(int x1, int y1, int x2, int y2, int split_row, int split_col);
 
 /**
  * redraw the whole window, e.g. after returning from another program.
@@ -48,11 +76,6 @@ void tui_write_result_line(struct tui_window *t, char *line, int n, int start, b
 void tui_clear_line(struct tui_window *t, int n, int start);
 
 /**
- * write `n` lines from `lines` to the window and refresh from `start` line.
- */
-void tui_write_lines(struct tui_window *t, char *lines, int line_width, int n, int offset, int start);
-
-/**
  * clear the whole window.
  */
 void tui_clear(struct tui_window *t);
@@ -62,17 +85,5 @@ void tui_clear(struct tui_window *t);
  * `line` is highlighted. return lines written.
  */
 int tui_write_file(struct tui_window *t, char *file, int first, int line, int offset);
-
-
-/**
- * scroll up or down `count` lines in a window `w`.
- */
-void tui_scroll_up(struct tui_window *t, int count);
-void tui_scroll_down(struct tui_window *t, int count);
-
-/**
- * highlight a line
- */
-void tui_highlight_line(struct tui_window *t, int line);
 
 #endif

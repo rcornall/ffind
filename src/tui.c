@@ -15,8 +15,7 @@ struct local_env {
 
 static struct local_env env;
 
-struct tui_window* tui_init(bool autosize, int rows, int cols,
-			    int x1, int y1, int x2, int y2)
+struct tui_window* tui_init(void)
 {
 	if (env.init == false) {
 		initscr();
@@ -36,10 +35,7 @@ struct tui_window* tui_init(bool autosize, int rows, int cols,
 	if (t == NULL)
 		return NULL;
 
-	// 1. Create a Pad instead of a Window
-	// A pad is (Height, Width). We make it tall enough for the file.
-	int pad_rows = (rows > 0) ? rows : LINES;
-	WINDOW *pad = newpad(pad_rows, COLS);
+	WINDOW *pad = newpad(LINES, COLS);
 	if (pad == NULL) {
 		free(t);
 		return NULL;
@@ -70,6 +66,64 @@ void tui_destroy(struct tui_window* t)
 	}
 
 	// refresh?
+}
+
+void tui_end(void)
+{
+	endwin();
+}
+
+void tui_suspend(void)
+{
+	def_prog_mode();
+	endwin();
+}
+
+void tui_resume(void)
+{
+	reset_prog_mode();
+	refresh();
+}
+
+void tui_set_area(struct tui_window *t, int x1, int y1, int x2, int y2)
+{
+	t->x1 = x1;
+	t->y1 = y1;
+	t->x2 = x2;
+	t->y2 = y2;
+}
+
+int tui_rows(struct tui_window *t)
+{
+	return t->y2 - t->y1 + 1;
+}
+
+void tui_draw_border(int x1, int y1, int x2, int y2, int split_row, int split_col)
+{
+	// one col of padding inside the border.
+	int top = y1 - 1, left = x1 - 2, bottom = y2 + 1, right = x2 + 2;
+
+	erase();
+	mvhline(top, left, ACS_HLINE, right - left);
+	mvhline(bottom, left, ACS_HLINE, right - left);
+	mvvline(top, left, ACS_VLINE, bottom - top);
+	mvvline(top, right, ACS_VLINE, bottom - top);
+	mvaddch(top, left, ACS_ULCORNER);
+	mvaddch(top, right, ACS_URCORNER);
+	mvaddch(bottom, left, ACS_LLCORNER);
+	mvaddch(bottom, right, ACS_LRCORNER);
+
+	if (split_row >= 0) {
+		mvhline(split_row, left, ACS_HLINE, right - left);
+		mvaddch(split_row, left, ACS_LTEE);
+		mvaddch(split_row, right, ACS_RTEE);
+	}
+	if (split_col >= 0) {
+		mvvline(top, split_col, ACS_VLINE, bottom - top);
+		mvaddch(top, split_col, ACS_TTEE);
+		mvaddch(bottom, split_col, ACS_BTEE);
+	}
+	refresh();
 }
 
 void tui_refresh(struct tui_window *t)
@@ -145,16 +199,6 @@ void tui_clear_line(struct tui_window *t, int n, int start)
 	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
 }
 
-void tui_write_lines(struct tui_window *t, char *lines, int line_width, int n, int offset, int start)
-{
-	for (int i=0; i< n; i++) {
-		mvwprintw(t->w, i+offset, 0, "%s", &lines[i * line_width]);
-	}
-	if (start >= 0)
-		t->curr_row = start;
-	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
-}
-
 void tui_clear(struct tui_window *t)
 {
 	werase(t->w);
@@ -204,17 +248,4 @@ int tui_write_file(struct tui_window *t, char *file, int first, int line, int of
 
 	prefresh(t->w, t->curr_row, t->curr_col, t->y1, t->x1, t->y2, t->x2);
 	return row - offset;
-}
-
-void tui_scroll_up(struct tui_window *t, int count)
-{
-	// tui_write_line(t, results[sel_line], sel_line, -1, true);
-}
-
-void tui_scroll_down(struct tui_window *t, int count)
-{
-}
-
-void tui_highlight_line(struct tui_window *t, int line)
-{
 }

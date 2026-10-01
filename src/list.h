@@ -9,6 +9,8 @@
  * | next -> |
  */
 
+#include <stdbool.h>
+
 #define FILTER_PREFIX "filter: "
 #define FILTER_PREFIX_LEN ((int)sizeof(FILTER_PREFIX) - 1)
 
@@ -43,9 +45,15 @@ struct list* list_push(struct list* l);
 void list_drop(struct list* l);
 
 /**
- * Run argv (without a shell) and fill list buf with stdoutput.
+ * Run argv (without a shell) and append its stdoutput to list buf.
+ * `quiet` drops its stderr, e.g. while the tui is up.
  */
-int list_run(struct list *l, char *const argv[]);
+int list_run(struct list *l, char *const argv[], bool quiet);
+
+/**
+ * drop all lines, keeping the filter.
+ */
+void list_clear(struct list *l);
 
 /**
  * destroy list and all lists pushed onto it.

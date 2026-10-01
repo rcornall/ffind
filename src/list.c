@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <sys/wait.h>
 
 struct list* list_init(void)
@@ -73,7 +74,7 @@ void list_drop(struct list* l)
 	last->next = NULL;
 }
 
-int list_run(struct list *l, char *const argv[])
+int list_run(struct list *l, char *const argv[], bool quiet)
 {
 	int fds[2];
 	if (pipe(fds) < 0) {
@@ -93,6 +94,11 @@ int list_run(struct list *l, char *const argv[])
 		dup2(fds[1], STDOUT_FILENO);
 		close(fds[0]);
 		close(fds[1]);
+		if (quiet) {
+			int null = open("/dev/null", O_WRONLY);
+			if (null >= 0)
+				dup2(null, STDERR_FILENO);
+		}
 		execvp(argv[0], argv);
 		fprintf(stderr, "Failed to run: %s: %s\n", argv[0], strerror(errno));
 		_exit(127);
@@ -132,15 +138,31 @@ int list_run(struct list *l, char *const argv[])
 	waitpid(pid, NULL, 0);
 
 	// index 0 is the filter line, results are 1-based.
-	l->map_filtered_to_line = malloc((l->total_lines + 1) * sizeof(int));
-	l->score = calloc(l->total_lines + 1, sizeof(int));
-	if (l->map_filtered_to_line == NULL || l->score == NULL)
+	int *map = realloc(l->map_filtered_to_line, (l->total_lines + 1) * sizeof(int));
+	if (map == NULL)
 		return -1;
+	l->map_filtered_to_line = map;
+
+	int *score = realloc(l->score, (l->total_lines + 1) * sizeof(int));
+	if (score == NULL)
+		return -1;
+	l->score = score;
+
 	for (int i = 0; i < l->total_lines; i++)
 		l->map_filtered_to_line[i+1] = i;
 	l->visible_lines = l->total_lines;
 
 	return l->total_lines;
+}
+
+void list_clear(struct list *l)
+{
+	for (int i = 0; i < l->total_lines; i++)
+		free(l->buf[i]);
+	l->total_lines = 0;
+	l->visible_lines = 0;
+	l->sel_line = 1;
+	l->view_top = 1;
 }
 
 void list_destroy(struct list* l)
