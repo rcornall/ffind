@@ -219,8 +219,18 @@ static void move_sel(struct tui_window *t1, struct list *l, int delta)
 	update_preview(l);
 }
 
-/* simple subsequent fuzzy matching */
-static bool fuzzy_match(const char *text, const char *pat, bool icase) {
+static bool has_upper(const char *s)
+{
+	for (; *s; s++)
+		if (isupper((unsigned char)*s))
+			return true;
+	return false;
+}
+
+/* simple subsequent fuzzy matching. smartcase: ignore case unless pat has uppercase. */
+static bool fuzzy_match(const char *text, const char *pat) {
+	bool icase = !has_upper(pat);
+
 	while (*text && *pat) {
 		char c = icase ? tolower((unsigned char)*text) : *text;
 		if (c == *pat)
@@ -230,22 +240,34 @@ static bool fuzzy_match(const char *text, const char *pat, bool icase) {
 	return *pat == '\0';
 }
 
-/* match all space-separated tokens against text (AND logic). smartcase. */
+/* plain substring matching, smartcase. */
+static bool substr_match(const char *text, const char *pat) {
+	bool icase = !has_upper(pat);
+	for (; *text; text++) {
+		const char *t = text, *p = pat;
+		while (*t && *p && (icase ? tolower((unsigned char)*t) : *t) == *p) {
+			t++;
+			p++;
+		}
+		if (*p == '\0')
+			return true;
+	}
+	return false;
+}
+
+/* match all space-separated tokens against text (AND logic). !token excludes lines containing token. */
 static bool fuzzy_match_all(const char *text, const char *pat) {
 	char tokens[100];
 	strncpy(tokens, pat, sizeof(tokens) - 1);
 	tokens[sizeof(tokens) - 1] = '\0';
 
-	bool icase = true;
-	for (const char *p = pat; *p; p++)
-		if (isupper((unsigned char)*p))
-			icase = false;
-
 	char *saveptr;
 	char *tok = strtok_r(tokens, " ", &saveptr);
-	if (!tok) return true;
 	while (tok) {
-		if (!fuzzy_match(text, tok, icase))
+		bool negate = tok[0] == '!';
+		if (negate)
+			tok++;
+		if (*tok && (negate ? substr_match(text, tok) : fuzzy_match(text, tok)) == negate)
 			return false;
 		tok = strtok_r(NULL, " ", &saveptr);
 	}
@@ -272,15 +294,31 @@ static bool read_timeout(unsigned char *ch, int ms)
 	return read(STDIN_FILENO, ch, 1) == 1;
 }
 
-static void apply_filter(struct tui_window *t1, struct list *l)
+/*
+ * filter the list. `narrow` when the filter only got stricter, so just the
+ * currently visible lines need checking.
+ */
+static void apply_filter(struct tui_window *t1, struct list *l, bool narrow)
 {
+	const char *pat = &l->filter[FILTER_PREFIX_LEN];
 	tui_write_line(t1, l->filter, 0, -1, false);
 
 	int line_no = 1;
-	for (int i = 0; i < l->total_lines; i++) {
-		if (fuzzy_match_all(l->buf[i], &l->filter[FILTER_PREFIX_LEN])) {
-			l->map_filtered_to_line[line_no] = i;
-			line_no++;
+	if (narrow) {
+		// compact the map in place, line_no never passes i.
+		for (int i = 1; i <= l->visible_lines; i++) {
+			int idx = l->map_filtered_to_line[i];
+			if (fuzzy_match_all(l->buf[idx], pat)) {
+				l->map_filtered_to_line[line_no] = idx;
+				line_no++;
+			}
+		}
+	} else {
+		for (int i = 0; i < l->total_lines; i++) {
+			if (fuzzy_match_all(l->buf[i], pat)) {
+				l->map_filtered_to_line[line_no] = i;
+				line_no++;
+			}
 		}
 	}
 	l->visible_lines = line_no - 1;
@@ -357,7 +395,7 @@ char* interactive_filter(struct tui_window *t1, struct list *l)
 				if (l->filter_len > FILTER_PREFIX_LEN) {
 					l->filter_len--;
 					l->filter[l->filter_len] = '\0';
-					apply_filter(t1, l);
+					apply_filter(t1, l, false);
 				}
 				break;
 
@@ -368,7 +406,11 @@ char* interactive_filter(struct tui_window *t1, struct list *l)
 					l->filter[l->filter_len] = ch;
 					l->filter[l->filter_len + 1] = '\0';
 					l->filter_len++;
-					apply_filter(t1, l);
+
+					// extending a !token excludes less, so needs a full rescan.
+					const char *last = strrchr(&l->filter[FILTER_PREFIX_LEN], ' ');
+					last = last ? last + 1 : &l->filter[FILTER_PREFIX_LEN];
+					apply_filter(t1, l, !(last[0] == '!' && strlen(last) > 2));
 				}
 				break;
 		}
